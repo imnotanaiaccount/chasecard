@@ -19,7 +19,7 @@ const CONFIG = {
       { key:'plus',    label:'Plus',    price:'$6.99/mo', dailyCredits:10000 },
       { key:'pro',     label:'Pro',     price:'$13.99/mo', dailyCredits:20000 },
       { key:'elite',   label:'Elite',   price:'$24.49/mo', dailyCredits:33500 },
-      { key:'vip',     label:'VIP',     price:'$99.99/mo', dailyCredits:335000 }, // Elite max daily (33,500) * 10 = 335,000 credits/day
+      { key:'vip',     label:'VIP',     price:'$99.99/mo', dailyCredits:100000 }, // VIP daily credits = 100,000 credits/day
     ],
   },
 };
@@ -564,7 +564,23 @@ async function onLoggedIn(){
 }
 async function loadProfile(){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
-  if(!error) profile = data;
+  if(!error) {
+    profile = data;
+    // Automatically redeem daily credits silently in the background if applicable
+    if (profile.is_premium) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (profile.last_daily_grant !== today) {
+        sb.rpc('claim_daily_credits').then(({ data: newCreds, error: claimErr }) => {
+          if (!claimErr && newCreds !== null) {
+            profile.credits = newCreds;
+            profile.last_daily_grant = today;
+            const creditCountEl = $('#credit-count');
+            if (creditCountEl && !isAdminUser()) creditCountEl.textContent = newCreds;
+          }
+        }).catch(()=>{});
+      }
+    }
+  }
 }
 
 (function captureRef(){
@@ -883,7 +899,7 @@ async function renderProfile() {
                  <option value="plus">Plus</option>
                  <option value="pro">Pro</option>
                  <option value="elite">Elite</option>
-                 <option value="vip">VIP Member (335,000 daily credits)</option>
+                 <option value="vip">VIP Member (100,000 daily credits)</option>
              </select>
          </div>
 
@@ -1094,40 +1110,8 @@ async function renderUserCollection(targetUserId, username) {
   }
 }
 
-function renderPremiumBanner(claimedToday){
-  const tier = CONFIG.ECONOMY.PREMIUM_TIERS.find(t=>t.key===profile?.premium_tier);
-  const dailyAmt = tier?.dailyCredits || 0;
-  const box = el('div');
-  box.style.cssText = 'background:linear-gradient(135deg,rgba(240,185,77,0.14),rgba(240,185,77,0.04)); border:1px solid var(--gold); border-radius:14px; padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px;';
-  box.innerHTML = `
-    <div>
-      <div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--gold);">${tier?.label || 'Premium'} Tier</div>
-      <div style="font-size:12.5px;color:var(--dim);">${claimedToday ? 'Come back tomorrow for more credits' : `${dailyAmt.toLocaleString()} credits ready to claim`}</div>
-    </div>
-    <button class="btn btn-gold" id="claim-daily-btn" ${claimedToday?'disabled':''}>${claimedToday ? 'Claimed ✓' : 'Claim'}</button>
-  `;
-  const btn = box.querySelector('#claim-daily-btn');
-  if(!claimedToday){
-    btn.addEventListener('click', async ()=>{
-      btn.disabled = true; btn.textContent = '…';
-      try{
-        const { data, error } = await sb.rpc('claim_daily_credits');
-        if(error) throw error;
-        profile.credits = data; profile.last_daily_grant = new Date().toISOString().slice(0,10);
-        $('#credit-count').textContent = isAdminUser() ? '∞' : data;
-        btn.textContent = 'Claimed ✓'; SFX.coin(); toast(`+${dailyAmt.toLocaleString()} credits`);
-      }catch(e){ btn.disabled=false; btn.textContent='Claim'; toast('Already claimed today'); }
-    });
-  }
-  return box;
-}
-
 async function renderHome(){
   const setsWrap = el('div');
-  if(!guestMode && profile?.is_premium){
-    const claimedToday = profile.last_daily_grant === new Date().toISOString().slice(0,10);
-    setsWrap.appendChild(renderPremiumBanner(claimedToday));
-  }
   setsWrap.appendChild(el('div','section-title','Choose a booster (Oldest → Newest)'));
   const gridHolder = el('div'); gridHolder.innerHTML = `<div class="set-grid" id="set-grid"></div>`;
   setsWrap.appendChild(gridHolder.firstChild);
@@ -1225,7 +1209,6 @@ async function renderSetDetail(setMeta){
       }
     } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
 
-    // Robust fallback pool for all sets including promo, McDonald's, and base sets
     rawUrls.push(
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
@@ -1730,7 +1713,7 @@ function openGetCreditsModal(lowBalance=false){
         <button class="btn ${t.key==='vip' ? 'btn-vip' : 'btn-gold'}" data-tier="${t.key}">Subscribe</button>
       </div>
     `).join('')}
-    <div class="hint">Cancel anytime. 2× referral bonus and gold foil included at every tier — VIP includes 335,000 daily credits and the full luxury treatment.</div>` : `
+    <div class="hint">Cancel anytime. 2× referral bonus and gold foil included at every tier — VIP includes 100,000 daily credits and the full luxury treatment.</div>` : `
     <div class="bundle" style="flex-direction:column;align-items:stretch;gap:8px;">
       <div>
         <div class="amt"${currentTier?.key==='vip' ? ' style="color:var(--vip-gold);"' : ' style="color:var(--gold);"'}>${currentTier?.key==='vip' ? '👑 ' : ''}${currentTier?.label || 'Premium'} active</div>
