@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'chasecards-universal-images-v14';
+        const CACHE_NAME = 'chasecards-universal-images-v15';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -401,7 +401,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v14');
+        const cache = await caches.open('chasecards-universal-images-v15');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -520,33 +520,10 @@ async function getSets(){
     }));
     
     const totalCount = data.length;
-    data = data.map((s, idx) => {
-      let cost = calculatePackCost(idx, totalCount);
-      if (s.releaseDate) {
-        const year = parseInt(s.releaseDate.split(/[-/]/)[0], 10);
-        if (!isNaN(year)) {
-          let multiplier = 10; // 2015 to current default (10x)
-          if (year < 2000) {
-            multiplier = 50;
-          } else if (year >= 2000 && year <= 2004) {
-            multiplier = 30;
-          } else if (year >= 2005 && year <= 2007) {
-            multiplier = 25;
-          } else if (year >= 2008 && year <= 2010) {
-            multiplier = 20;
-          } else if (year >= 2011 && year <= 2014) {
-            multiplier = 15;
-          } else {
-            multiplier = 10;
-          }
-          cost *= multiplier;
-        }
-      }
-      return {
-        ...s,
-        packCost: Math.round(cost / 5) * 5
-      };
-    });
+    data = data.map((s, idx) => ({
+      ...s,
+      packCost: calculatePackCost(idx, totalCount)
+    }));
 
     globalSortedSets = data;
     store.set('cache_sets_v2', { t: Date.now(), data });
@@ -788,7 +765,6 @@ function render(name, params={}){
   if(name==='set') renderSetDetail(params.set);
   if(name==='collection') renderCollection();
   if(name==='search') renderSearch();
-  if(name==='stats') renderStats();
   if(name==='profile') renderProfile();
   if(name==='user_collection') renderUserCollection(params.userId, params.username);
   if(name==='trade') renderTrade();
@@ -971,7 +947,6 @@ function renderTabs(){
     { key:'home', label:'Packs', icon:'M4 12l8-8 8 8M6 10v10h12V10' },
     { key:'collection', label:'Collections', icon:'M4 6h16M4 12h16M4 18h16' },
     { key:'trade', label:'Trade', icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
-    { key:'stats', label:'Stats', icon:'M18 20V10M12 20V4M6 20v-6' },
     { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
   ];
   items.forEach(it=>{
@@ -1134,47 +1109,6 @@ async function renderProfile() {
         if (adminPanel) adminPanel.style.display = 'none';
     }
   }, 0);
-}
-
-async function renderStats() {
-  const stats = getPlayerStats();
-  const wrap = el('div');
-  wrap.innerHTML = `
-    <div class="section-title">Stats & Milestones</div>
-    
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:20px;">
-      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
-        <div style="font-size:24px; font-weight:bold; color:var(--cyan);">${stats.packsOpened.toLocaleString()}</div>
-        <div class="hint" style="margin-top:4px;">Packs Opened</div>
-      </div>
-      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
-        <div style="font-size:24px; font-weight:bold; color:var(--gold);">${stats.creditsSpent.toLocaleString()}</div>
-        <div class="hint" style="margin-top:4px;">Credits Spent</div>
-      </div>
-      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
-        <div style="font-size:24px; font-weight:bold; color:var(--tier-sillus);">${stats.cardsSold.toLocaleString()}</div>
-        <div class="hint" style="margin-top:4px;">Cards Sold</div>
-      </div>
-      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
-        <div style="font-size:24px; font-weight:bold; color:var(--tier-holo);">${stats.totalSoldEarned.toLocaleString()}</div>
-        <div class="hint" style="margin-top:4px;">Credits Earned</div>
-      </div>
-    </div>
-
-    <div class="account-card">
-      <h3 style="margin-top:0; color:var(--cyan);">🏆 Rarest Pull Trophy</h3>
-      ${stats.rarestPull.tierId >= 0 ? `
-        <div style="display:flex; align-items:center; gap:16px; margin-top:12px;">
-          <img src="${stats.rarestPull.image}" style="width:70px; height:98px; object-fit:contain; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.5);" onerror="this.style.display='none'"/>
-          <div>
-            <div style="font-weight:bold; font-size:16px; margin-bottom:4px;">${stats.rarestPull.name}</div>
-            <div class="account-badge" style="display:inline-block; background:${classify(stats.rarestPull.rarity).color}; color:#000; font-weight:bold;">${stats.rarestPull.rarity}</div>
-          </div>
-        </div>
-      ` : '<div class="hint" style="margin-top:8px;">No high-tier hits pulled yet. Open some packs to claim your trophy!</div>'}
-    </div>
-  `;
-  app.appendChild(wrap);
 }
 
 async function renderSearch() {
@@ -1765,7 +1699,7 @@ function showBulkSummary(setMeta, openedPacks){
 }
 
 /* ============================================================
-   Collections View (With Rename, Delete, Export/Import)
+   Collections View (With Clear, Rename, Delete, Export/Import)
    ============================================================ */
 function renderCollection(){
   const map = getCollectionsMap();
@@ -1792,6 +1726,7 @@ function renderCollection(){
         </select>
         <button class="btn btn-primary" id="new-collection-btn" style="padding:8px 14px; font-size:13px;">+ New Collection</button>
         <button class="btn btn-secondary" id="rename-collection-btn" style="padding:8px 12px; font-size:13px;">✏️ Rename</button>
+        <button class="btn btn-secondary" id="clear-coll-btn" style="padding:8px 12px; font-size:13px; color:var(--gold); border-color:var(--gold);">🧹 Clear Cards</button>
         <button class="btn btn-secondary" id="delete-collection-btn" style="padding:8px 12px; font-size:13px; color:var(--danger); border-color:var(--danger);">🗑️ Delete</button>
       </div>
       <div class="hint" style="font-size:11px;">💡 Tap any card in your collection to view details or sell it back for 70% of estimated market value in virtual credits.</div>
@@ -1830,6 +1765,16 @@ function renderCollection(){
     store.set('active_collection', trimmed);
     render('collection');
     toast('Collection renamed successfully');
+  });
+
+  $('#clear-coll-btn', wrap).addEventListener('click', () => {
+    if(!Object.keys(coll).length) { toast('Collection is already empty'); return; }
+    if(!confirm(`Are you sure you want to clear all cards from collection "${activeName}"?`)) return;
+    map[activeName] = {};
+    store.set('user_collections', map);
+    store.set('collection', {});
+    render('collection');
+    toast(`Cleared all cards from "${activeName}"`);
   });
 
   $('#delete-collection-btn', wrap).addEventListener('click', () => {
