@@ -8,6 +8,11 @@ const CONFIG = {
   SUPABASE_URL: 'https://mdtpdqwxegmseidxnnvb.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kdHBkcXd4ZWdtc2VpZHhubnZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMTEzMzEsImV4cCI6MjEwMTg4NzMzMX0.ZWkYKmt6N7-0jqwEMB4Zn9H1BDUvGPZb1EsEAS7VRBI',
   APP_URL: window.location.origin + '/',
+  // Free key from https://dev.pokemontcg.io — unauthenticated requests share a
+  // tiny rate limit and are the main cause of intermittent 500s / failed
+  // fetches on the set & card endpoints. Get a key (takes ~1 min, no cost)
+  // and paste it here to fix that.
+  POKEMON_TCG_API_KEY: 'b1902dec-c387-4d44-b8f1-ac6205687cdc',
 
   ECONOMY: {
     STARTING_CREDITS: 2250,
@@ -463,9 +468,10 @@ const POKE_API_BASE = 'https://api.pokemontcg.io/v2';
 async function pokeFetch(endpoint, attempt=1){
   showLoader();
   const ctrl = new AbortController();
-  const timeout = setTimeout(()=>ctrl.abort(), 10000);
+  const timeout = setTimeout(()=>ctrl.abort(), 12000);
   try{
-    const res = await fetch(`${POKE_API_BASE}${endpoint}`, { signal: ctrl.signal });
+    const headers = CONFIG.POKEMON_TCG_API_KEY ? { 'X-Api-Key': CONFIG.POKEMON_TCG_API_KEY } : {};
+    const res = await fetch(`${POKE_API_BASE}${endpoint}`, { signal: ctrl.signal, headers });
     if(!res.ok){
       const err = new Error('Pokémon TCG API error ' + res.status);
       err.status = res.status;
@@ -473,8 +479,8 @@ async function pokeFetch(endpoint, attempt=1){
     }
     return await res.json();
   }catch(e){
-    if(attempt < 3 && (e.name==='AbortError' || e.status>=500 || !e.status)){
-      await new Promise(r=>setTimeout(r, attempt*1000));
+    if(attempt < 4 && (e.name==='AbortError' || e.status>=500 || !e.status)){
+      await new Promise(r=>setTimeout(r, attempt*1200));
       return pokeFetch(endpoint, attempt+1);
     }
     throw e;
@@ -708,10 +714,17 @@ async function onLoggedIn(){
   }
   render('home');
 }
-async function loadProfile(){
+async function loadProfile(attempt=1){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
-  if(error) console.error('loadProfile failed:', error);
-  if(!error) {
+  if(error){
+    console.error('loadProfile failed:', error);
+    if(attempt < 3){
+      await new Promise(r=>setTimeout(r, attempt*1000));
+      return loadProfile(attempt+1);
+    }
+    return;
+  }
+  {
     profile = data;
     const creditCountEl = $('#credit-count');
     if (creditCountEl) creditCountEl.textContent = currentCredits();
@@ -1256,10 +1269,112 @@ async function renderUserCollection(targetUserId, username) {
              } catch(e) { toast('Action failed'); }
              followBtn.disabled = false;
          });
+
+         const tradeBtn = el('button','btn btn-primary','🤝 Propose Trade');
+         tradeBtn.style.cssText = 'width:100%; margin-top:12px;';
+         tradeBtn.addEventListener('click', ()=> openTradeBuilder(targetUserId, username, coll));
+         wrap.appendChild(tradeBtn);
      }
   } catch(err) {
      grid.innerHTML = '<div class="hint" style="grid-column:1/-1; color:var(--danger)">Error loading user collection.</div>';
   }
+}
+
+async function openTradeBuilder(targetUserId, username, theirColl){
+  if(!session){ toast('Log in to trade'); return; }
+  const overlay = el('div','overlay');
+  const sheet = el('div','sheet');
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>Trade with ${username || 'this collector'}</h2>
+    <div class="sub">Tap one card you'll give, then one card you want back. Quantity is 1-for-1 for now.</div>
+    <div style="margin-top:14px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:6px;">Your card to offer</div>
+      <div class="collection-grid" id="my-trade-grid" style="max-height:160px; overflow-y:auto;"><div class="hint">Loading your collection…</div></div>
+    </div>
+    <div style="margin-top:16px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:6px;">Their card you want</div>
+      <div class="collection-grid" id="their-trade-grid" style="max-height:160px; overflow-y:auto;"></div>
+    </div>
+    <button class="btn btn-primary" id="send-trade-btn" style="width:100%; margin-top:16px;" disabled>Select a card from each side</button>
+    <div class="hint" id="trade-err" style="color:#ff6b6b; text-align:center; min-height:14px; margin-top:8px;"></div>
+  `;
+
+  let myCard = null, theirCard = null;
+  const sendBtn = $('#send-trade-btn', sheet);
+  const errBox = $('#trade-err', sheet);
+  function refreshSendBtn(){
+    if(myCard && theirCard){ sendBtn.disabled = false; sendBtn.textContent = 'Send Trade Offer'; }
+    else { sendBtn.disabled = true; sendBtn.textContent = 'Select a card from each side'; }
+  }
+
+  const theirGrid = $('#their-trade-grid', sheet);
+  const theirKeys = Object.keys(theirColl || {});
+  if(!theirKeys.length){
+    theirGrid.innerHTML = '<div class="hint">They have no cards to trade yet.</div>';
+  } else {
+    theirGrid.innerHTML = '';
+    theirKeys.forEach(id=>{
+      const c = theirColl[id];
+      const item = el('div','coll-item');
+      item.style.cursor = 'pointer';
+      item.innerHTML = `<img src="${c.image}" onerror="this.style.opacity=0.3"/><span class="count">×${c.count}</span>`;
+      item.addEventListener('click', ()=>{
+        theirGrid.querySelectorAll('.coll-item').forEach(n=>n.style.outline='');
+        item.style.outline = '2px solid var(--cyan)';
+        theirCard = { id, name:c.name, image:c.image, rarity:c.rarity, qty:1 };
+        refreshSendBtn();
+      });
+      theirGrid.appendChild(item);
+    });
+  }
+
+  const myGrid = $('#my-trade-grid', sheet);
+  try{
+    const { data: myColl, error } = await sb.rpc('get_user_collection', { p_user: session.user.id });
+    if(error) throw error;
+    if(!myColl || !myColl.length){
+      myGrid.innerHTML = '<div class="hint">You don\'t have any tradeable cards yet — open a pack first.</div>';
+    } else {
+      myGrid.innerHTML = '';
+      myColl.forEach(c=>{
+        const item = el('div','coll-item');
+        item.style.cursor = 'pointer';
+        item.innerHTML = `<img src="${c.image}" onerror="this.style.opacity=0.3"/><span class="count">×${c.count}</span>`;
+        item.addEventListener('click', ()=>{
+          myGrid.querySelectorAll('.coll-item').forEach(n=>n.style.outline='');
+          item.style.outline = '2px solid var(--gold)';
+          myCard = { id:c.card_id, name:c.name, image:c.image, rarity:c.rarity, qty:1 };
+          refreshSendBtn();
+        });
+        myGrid.appendChild(item);
+      });
+    }
+  }catch(e){
+    myGrid.innerHTML = '<div class="hint" style="color:var(--danger)">Could not load your collection. Try again.</div>';
+  }
+
+  sendBtn.addEventListener('click', async ()=>{
+    if(!myCard || !theirCard) return;
+    sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; errBox.textContent = '';
+    try{
+      const { error } = await sb.rpc('propose_trade', {
+        p_to_user: targetUserId,
+        p_offer_cards: [myCard],
+        p_request_cards: [theirCard]
+      });
+      if(error) throw error;
+      overlay.remove();
+      toast('Trade offer sent!');
+    }catch(e){
+      errBox.textContent = e.message?.includes('you_do_not_have_enough') ? "You don't have that card anymore." : (e.message || 'Could not send trade.');
+      sendBtn.disabled = false; sendBtn.textContent = 'Send Trade Offer';
+    }
+  });
 }
 
 async function renderHome(){
@@ -1887,21 +2002,75 @@ function renderCollection(){
 }
 
 /* ============================================================
-   Trading Hub — coming soon
-   Real trading requires collections to live server-side so there's
-   an actual recipient to transfer to. Until that exists, this screen
-   must not claim to send anything or remove cards from the sender.
+   Trading Hub — server-backed, real card-for-card trades
    ============================================================ */
 function renderTrade(){
   const wrap = el('div');
-  wrap.innerHTML = `
-    <div class="section-title">Direct Card Trade Hub</div>
-    <div class="account-card" style="margin-bottom:16px;">
-      <h3 style="margin-top:0; color:var(--cyan);">🤝 Trading — Coming Soon</h3>
-      <p class="hint">Trading directly with other collectors isn't live yet. We're building it out so trades are real and secure. Check back soon!</p>
-    </div>
-  `;
+  wrap.innerHTML = `<div class="section-title">Trade Hub</div><div id="trade-list"></div>`;
   app.appendChild(wrap);
+  const list = $('#trade-list', wrap);
+
+  if(guestMode || !session){
+    list.innerHTML = `<div class="account-card"><p class="hint">Log in to trade cards with other collectors — guest collections aren't saved to an account, so there's nothing to trade from.</p></div>`;
+    return;
+  }
+
+  list.innerHTML = '<div class="hint">Loading your trade offers…</div>';
+  loadTrades();
+
+  async function loadTrades(){
+    try{
+      const { data, error } = await sb.rpc('my_pending_trades');
+      if(error) throw error;
+      if(!data || !data.length){
+        list.innerHTML = `<div class="account-card"><p class="hint">No pending trades. Find a collector under Search, open their collection, and tap "Propose Trade" to start one.</p></div>`;
+        return;
+      }
+      list.innerHTML = '';
+      data.forEach(t=>{
+        const incoming = t.to_user === session.user.id;
+        const card = el('div','account-card'); card.style.marginBottom = '10px';
+        const offer = t.offer_cards[0], request = t.request_cards[0];
+        card.innerHTML = `
+          <div style="font-size:12px; color:var(--dim); margin-bottom:6px;">${incoming ? 'Offer to you' : 'Your pending offer'}</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <img src="${offer?.image||''}" style="width:48px;height:67px;object-fit:cover;border-radius:6px;" onerror="this.style.opacity=0.3"/>
+            <span style="color:var(--dim); font-size:18px;">⇄</span>
+            <img src="${request?.image||''}" style="width:48px;height:67px;object-fit:cover;border-radius:6px;" onerror="this.style.opacity=0.3"/>
+            <div style="flex:1; font-size:12.5px; color:var(--dim);">
+              ${incoming ? `Gives you <b style="color:var(--text)">${offer?.name}</b> for your <b style="color:var(--text)">${request?.name}</b>` : `You offered <b style="color:var(--text)">${offer?.name}</b> for their <b style="color:var(--text)">${request?.name}</b>`}
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            ${incoming ? `<button class="btn btn-primary accept-btn" style="flex:1;">Accept</button><button class="btn btn-secondary decline-btn" style="flex:1;">Decline</button>`
+                       : `<button class="btn btn-secondary cancel-btn" style="flex:1;">Cancel Offer</button>`}
+          </div>
+        `;
+        if(incoming){
+          card.querySelector('.accept-btn').addEventListener('click', async (e)=>{
+            e.target.disabled = true; e.target.textContent = '...';
+            try{ const { error } = await sb.rpc('respond_trade', { p_trade_id: t.id, p_accept: true }); if(error) throw error; toast('Trade complete!'); loadTrades(); }
+            catch(err){ toast(err.message || 'Could not accept trade'); e.target.disabled = false; e.target.textContent = 'Accept'; }
+          });
+          card.querySelector('.decline-btn').addEventListener('click', async (e)=>{
+            e.target.disabled = true;
+            try{ await sb.rpc('respond_trade', { p_trade_id: t.id, p_accept: false }); loadTrades(); }
+            catch(err){ toast('Could not decline trade'); e.target.disabled = false; }
+          });
+        } else {
+          card.querySelector('.cancel-btn').addEventListener('click', async (e)=>{
+            e.target.disabled = true;
+            try{ await sb.rpc('cancel_trade', { p_trade_id: t.id }); loadTrades(); }
+            catch(err){ toast('Could not cancel trade'); e.target.disabled = false; }
+          });
+        }
+        list.appendChild(card);
+      });
+    }catch(e){
+      list.innerHTML = `<div class="hint" style="color:var(--danger)">Couldn't load trades. <button class="btn btn-secondary" id="retry-trades" style="margin-top:8px;">Retry</button></div>`;
+      $('#retry-trades', list)?.addEventListener('click', loadTrades);
+    }
+  }
 }
 
 const SHARE_BONUS = 5000;
