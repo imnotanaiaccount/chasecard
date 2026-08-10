@@ -10,9 +10,9 @@ const CONFIG = {
   BILLING_PORTAL_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-billing-portal-session',
   
   ECONOMY: {
-    STARTING_CREDITS: 2250,
+    STARTING_CREDITS: 500,
     GUEST_CREDITS: 2250, // Fair starting credit amount for guest sessions (450 * 5)
-    REFERRAL_BONUS: 10000,
+    REFERRAL_BONUS: 250,
     PREMIUM_TIERS: [
       { key:'free',    label:'Free',    price:'$0/mo',    dailyCredits:0      },
       { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
@@ -914,7 +914,6 @@ async function renderProfile() {
   }
   
   setTimeout(async () => {
-    // Reload profile fresh to guarantee correct admin status check
     if(session) await loadProfile();
     renderAccountArea(session?.user, profile);
 
@@ -1215,28 +1214,24 @@ async function renderSetDetail(setMeta){
     const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
     
     let rawUrls = [];
-    const isPromoOrSpecial = idLower.includes('mcd') || idLower.includes('base') || idLower.includes('promo') || idLower.includes('det');
-    
-    if (!isPromoOrSpecial) {
-      try {
-        const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
-        const ghRes = await fetch(githubApiUrl);
-        if (ghRes.ok) {
-          const files = await ghRes.json();
-          const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
-          images.sort((a,b) => a.name.localeCompare(b.name));
-          rawUrls = images.map(img => img.download_url);
-        }
-      } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
-    }
+    try {
+      const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
+      const ghRes = await fetch(githubApiUrl);
+      if (ghRes.ok) {
+        const files = await ghRes.json();
+        const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
+        images.sort((a,b) => a.name.localeCompare(b.name));
+        rawUrls = images.map(img => img.download_url);
+      }
+    } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
 
-    if (rawUrls.length === 0 && !isPromoOrSpecial) {
-      rawUrls = [
-        `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
-        `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
-        tcgdexBase ? `${tcgdexBase}/pack/high.webp` : null
-      ].filter(Boolean);
-    }
+    // Robust fallback pool for all sets including promo, McDonald's, and base sets
+    rawUrls.push(
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
+      tcgdexBase ? `${tcgdexBase}/pack/high.webp` : null
+    );
+    rawUrls = rawUrls.filter(Boolean);
 
     const validUrls = [];
     for(const url of rawUrls) {
