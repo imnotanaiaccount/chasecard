@@ -14,6 +14,7 @@ const CONFIG = {
     GUEST_CREDITS: 2250, // Fair starting credit amount for guest sessions (450 * 5)
     REFERRAL_BONUS: 250,
     PREMIUM_TIERS: [
+      { key:'free',    label:'Free',    price:'$0/mo',    dailyCredits:0      },
       { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
       { key:'plus',    label:'Plus',    price:'$6.99/mo', dailyCredits:10000 },
       { key:'pro',     label:'Pro',     price:'$13.99/mo', dailyCredits:20000 },
@@ -78,7 +79,7 @@ customStyles.innerHTML = `
 }
 
 /* Polished Auth Inputs Fix */
-.auth-form input, .sheet input[type="email"], .sheet input[type="password"], .sheet input[type="text"] {
+.auth-form input, .sheet input[type="email"], .sheet input[type="password"], .sheet input[type="text"], .sheet select {
   width: 100%;
   padding: 12px 14px;
   border-radius: 12px;
@@ -90,7 +91,7 @@ customStyles.innerHTML = `
   margin-bottom: 8px;
   font-size: 1rem;
 }
-.auth-form input:focus, .sheet input:focus {
+.auth-form input:focus, .sheet input:focus, .sheet select:focus {
   border-color: var(--cyan);
   outline: none;
 }
@@ -191,9 +192,8 @@ function getCardMarketValue(card) {
 
 function getCardSellValue(card) {
   const marketValUSD = getCardMarketValue(card);
-  // 70% of market value converted to virtual credits (e.g. $1.00 USD = 100 virtual credits)
   const sellValCredits = Math.round(marketValUSD * 0.70 * 100);
-  return Math.max(10, sellValCredits); // Minimum 10 credits
+  return Math.max(10, sellValCredits);
 }
 
 function showCardFullscreen(imgSrc, cardObj){
@@ -233,7 +233,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   const activeName = getActiveCollectionName();
   const coll = map[activeName] || {};
   
-  if(!coll[cardObj.id] || coll[cardObj.id].count <= 0) {
+  if(!cardObj || !cardObj.id || !coll[cardObj.id] || coll[cardObj.id].count <= 0) {
     toast('Card not found in active binder');
     return;
   }
@@ -247,7 +247,6 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   store.set('user_collections', map);
   store.set('collection', coll);
   
-  // Credit user virtual currency
   if(guestMode) {
     const gs = getGuestState();
     gs.credits = (gs.credits || 0) + creditsEarned;
@@ -256,7 +255,6 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   } else if(profile) {
     profile.credits = (profile.credits || 0) + creditsEarned;
     $('#credit-count').textContent = profile.credits;
-    // Update server side if logged in
     sb.from('profiles').update({ credits: profile.credits }).eq('id', session.user.id).then();
   }
   
@@ -857,12 +855,28 @@ async function renderProfile() {
       
       <div id="admin-panel" style="display:none; margin-top:30px; padding:18px; background:var(--panel-2); border:1px solid var(--vip-gold-dim); border-radius:14px; box-shadow: 0 4px 15px rgba(255, 233, 184, 0.1);">
          <h3 style="color:var(--vip-gold); margin-top:0; font-family:var(--font-display); font-size:18px;">🛠️ Admin Controls</h3>
-         <p class="hint" style="margin-bottom:14px;">Manage free VIP promotions or demote users by their exact account email or username.</p>
-         <input type="email" id="admin-target-email" placeholder="user@email.com or username" style="width:100%; padding:14px 16px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); margin-bottom:12px; font-family:var(--font-body);" />
-         <div style="display:flex; gap:8px;">
-             <button class="btn btn-vip" id="admin-grant-btn" style="flex:1;">Grant VIP Status</button>
-             <button class="btn btn-secondary" id="admin-demote-btn" style="flex:1; border-color:var(--danger); color:var(--danger);">Demote to Free</button>
+         <p class="hint" style="margin-bottom:14px;">Select any registered user from the list and manually update their membership level.</p>
+         
+         <div style="margin-bottom:12px;">
+             <label class="hint" style="display:block; margin-bottom:4px; font-weight:bold;">Select Registered User:</label>
+             <select id="admin-target-user-select" style="width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); font-family:var(--font-body);">
+                 <option value="">Loading registered users...</option>
+             </select>
          </div>
+
+         <div style="margin-bottom:12px;">
+             <label class="hint" style="display:block; margin-bottom:4px; font-weight:bold;">Target Membership Tier:</label>
+             <select id="admin-target-tier-select" style="width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); font-family:var(--font-body);">
+                 <option value="free">Free Account</option>
+                 <option value="starter">Starter</option>
+                 <option value="plus">Plus</option>
+                 <option value="pro">Pro</option>
+                 <option value="elite">Elite</option>
+                 <option value="vip">VIP Member</option>
+             </select>
+         </div>
+
+         <button class="btn btn-vip" id="admin-update-membership-btn" style="width:100%;">Update User Membership</button>
          <div id="admin-msg" class="hint" style="margin-top:12px; text-align:center; font-weight:bold; min-height:16px;"></div>
       </div>
   `;
@@ -884,60 +898,56 @@ async function renderProfile() {
       return;
   }
   
-  setTimeout(() => {
+  setTimeout(async () => {
     renderAccountArea(session?.user, profile);
     if (session && profile?.is_admin) {
         const adminPanel = $('#admin-panel', wrap);
-        const grantBtn = $('#admin-grant-btn', wrap);
-        const demoteBtn = $('#admin-demote-btn', wrap);
-        const targetInput = $('#admin-target-email', wrap);
+        const updateBtn = $('#admin-update-membership-btn', wrap);
+        const userSelect = $('#admin-target-user-select', wrap);
+        const tierSelect = $('#admin-target-tier-select', wrap);
         const msgBox = $('#admin-msg', wrap);
         
         if (adminPanel) adminPanel.style.display = 'block';
-        
-        if (grantBtn) {
-            grantBtn.addEventListener('click', async () => {
-                const targetEmail = targetInput.value.trim();
-                if(!targetEmail) {
-                    msgBox.style.color = 'var(--danger)';
-                    msgBox.textContent = 'Enter an email or username first.';
-                    return;
-                }
-                grantBtn.disabled = true; grantBtn.textContent = 'Granting...';
-                try {
-                    const { error } = await sb.rpc('admin_grant_vip', { target_email: targetEmail });
-                    if(error) throw error;
-                    msgBox.style.color = 'var(--cyan)';
-                    msgBox.textContent = 'Success! User is now a VIP.';
-                    targetInput.value = '';
-                } catch(e) {
-                    msgBox.style.color = 'var(--danger)';
-                    msgBox.textContent = e.message;
-                }
-                grantBtn.disabled = false; grantBtn.textContent = 'Grant VIP Status';
-            });
-        }
 
-        if (demoteBtn) {
-            demoteBtn.addEventListener('click', async () => {
-                const targetEmail = targetInput.value.trim();
-                if(!targetEmail) {
+        // Load registered users into the dropdown selector
+        try {
+            const { data: usersList, error: usersErr } = await sb.from('profiles').select('id, email, username, premium_tier').order('email', { ascending: true });
+            if (usersErr) throw usersErr;
+            if (usersList && usersList.length > 0) {
+                userSelect.innerHTML = usersList.map(u => `<option value="${u.email || u.id}">${u.email || u.username || u.id} (Current: ${u.premium_tier || 'free'})</option>`).join('');
+            } else {
+                userSelect.innerHTML = '<option value="">No registered users found</option>';
+            }
+        } catch(e) {
+            userSelect.innerHTML = '<option value="">Error loading users list</option>';
+        }
+        
+        if (updateBtn) {
+            updateBtn.addEventListener('click', async () => {
+                const targetIdentifier = userSelect.value;
+                const newTier = tierSelect.value;
+                if(!targetIdentifier) {
                     msgBox.style.color = 'var(--danger)';
-                    msgBox.textContent = 'Enter an email or username first.';
+                    msgBox.textContent = 'Please select a valid user.';
                     return;
                 }
-                demoteBtn.disabled = true; demoteBtn.textContent = 'Demoting...';
+                updateBtn.disabled = true; updateBtn.textContent = 'Updating...';
                 try {
-                    const { error } = await sb.rpc('admin_demote_vip', { target_email: targetEmail });
+                    const { error } = await sb.rpc('admin_set_membership', { target_identifier: targetIdentifier, new_tier: newTier });
                     if(error) throw error;
                     msgBox.style.color = 'var(--cyan)';
-                    msgBox.textContent = 'Success! User has been demoted to free.';
-                    targetInput.value = '';
+                    msgBox.textContent = `Success! User membership updated to ${newTier.toUpperCase()}.`;
+                    
+                    // Refresh user dropdown list to show updated tier
+                    const { data: refreshedList } = await sb.from('profiles').select('id, email, username, premium_tier').order('email', { ascending: true });
+                    if (refreshedList) {
+                        userSelect.innerHTML = refreshedList.map(u => `<option value="${u.email || u.id}" ${u.email === targetIdentifier ? 'selected' : ''}>${u.email || u.username || u.id} (Current: ${u.premium_tier || 'free'})</option>`).join('');
+                    }
                 } catch(e) {
                     msgBox.style.color = 'var(--danger)';
                     msgBox.textContent = e.message;
                 }
-                demoteBtn.disabled = false; demoteBtn.textContent = 'Demote to Free';
+                updateBtn.disabled = false; updateBtn.textContent = 'Update User Membership';
             });
         }
     }
@@ -1023,7 +1033,7 @@ async function renderUserCollection(targetUserId, username) {
         keys.sort((a,b)=> classify(coll[b].rarity).id - classify(coll[a].rarity).id).forEach(id=>{
           const c = coll[id]; const item = el('div','coll-item');
           item.innerHTML = `<img src="${c.image}"/><span class="count">×${c.count}</span>`;
-          item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), c));
+          item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), { id, ...c }));
           grid.appendChild(item);
         });
      }
@@ -1590,7 +1600,7 @@ function renderCollection(){
     keys.sort((a,b)=> classify(coll[b].rarity).id - classify(coll[a].rarity).id).forEach(id=>{
       const c = coll[id]; const item = el('div','coll-item');
       item.innerHTML = `<img src=""/><span class="count">×${c.count}</span>`;
-      item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), c));
+      item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), { id, ...c }));
       grid.appendChild(item);
       ImgCache.get(c.image).then(src => item.querySelector('img').src = src);
     });
@@ -1598,68 +1608,64 @@ function renderCollection(){
 }
 
 /* ============================================================
-   Trading System (Individual Cards & Entire Collections)
+   Simplified Direct Trading Hub (Virtual Items Only)
    ============================================================ */
 function renderTrade(){
+  const map = getCollectionsMap();
+  const activeName = getActiveCollectionName();
+  const coll = map[activeName] || {};
+  const cardKeys = Object.keys(coll);
+
   const wrap = el('div');
   wrap.innerHTML = `
-    <div class="section-title">Card & Collection Trading</div>
+    <div class="section-title">Direct Card Trade Hub</div>
     <div class="account-card" style="margin-bottom:16px;">
-      <h3 style="margin-top:0; color:var(--cyan);">🤝 Trade Hub</h3>
-      <p class="hint">Trade individual cards or share your entire collection binder with friends via secure trade links or direct peer codes. All trades involve virtual items and simulation currency only.</p>
+      <h3 style="margin-top:0; color:var(--cyan);">🤝 Send a Card</h3>
+      <p class="hint">Select a card from your active binder and send it directly to another collector by their username or email. All trades involve virtual items and simulation currency only.</p>
     </div>
 
-    <div style="display:flex; flex-direction:column; gap:14px;">
-      <div class="account-card">
-        <h4 style="margin-top:0;">1. Create Trade Offer</h4>
-        <p class="hint" style="margin-bottom:10px;">Select what you want to offer from your active binder.</p>
-        <button class="btn btn-primary" id="generate-trade-offer-btn" style="width:100%;">Generate Trade Code for Active Binder</button>
-        <div id="trade-code-output" class="hint" style="margin-top:10px; word-break:break-all; font-family:monospace; color:var(--cyan);"></div>
-      </div>
-
-      <div class="account-card">
-        <h4 style="margin-top:0;">2. Accept Incoming Trade</h4>
-        <p class="hint" style="margin-bottom:10px;">Paste a trade offer code received from another collector.</p>
-        <textarea id="incoming-trade-input" placeholder="Paste trade code here..." style="width:100%; height:80px; padding:10px; border-radius:10px; background:var(--panel); color:var(--text); border:1px solid var(--edge); font-family:monospace; font-size:12px; box-sizing:box-sizing; margin-bottom:8px;"></textarea>
-        <button class="btn btn-secondary" id="accept-trade-btn" style="width:100%;">Review & Accept Trade</button>
-      </div>
+    <div class="account-card" style="display:flex; flex-direction:column; gap:12px;">
+      <h4 style="margin-top:0;">Select Card to Send</h4>
+      ${!cardKeys.length ? '<div class="hint">Your active binder is empty. Open some packs first!</div>' : `
+        <select id="trade-card-select">
+          ${cardKeys.map(id => `<option value="${id}">${coll[id].name} (${coll[id].rarity || 'Common'}) [×${coll[id].count}]</option>`).join('')}
+        </select>
+        <input type="text" id="trade-recipient-input" placeholder="Recipient username or email..." />
+        <button class="btn btn-primary" id="send-card-trade-btn" style="width:100%; margin-top:4px;">Send Card Gift</button>
+      `}
     </div>
   `;
   app.appendChild(wrap);
 
-  $('#generate-trade-offer-btn', wrap).addEventListener('click', () => {
-    const activeName = getActiveCollectionName();
-    const coll = getActiveCollectionCards();
-    const tradePayload = {
-      sender: session ? session.user.email : 'Guest Collector',
-      binderName: activeName,
-      collection: coll,
-      timestamp: Date.now()
-    };
-    const encoded = btoa(JSON.stringify(tradePayload));
-    $('#trade-code-output', wrap).textContent = encoded;
-    toast('Trade offer generated successfully!');
-  });
+  if(cardKeys.length) {
+    $('#send-card-trade-btn', wrap).addEventListener('click', () => {
+      const selectedId = $('#trade-card-select', wrap).value;
+      const recipient = $('#trade-recipient-input', wrap).value.trim();
+      
+      if(!recipient) {
+        toast('Please enter a recipient username or email.');
+        return;
+      }
+      
+      const cardObj = coll[selectedId];
+      if(!cardObj || cardObj.count <= 0) {
+        toast('Selected card is no longer available.');
+        return;
+      }
 
-  $('#accept-trade-btn', wrap).addEventListener('click', () => {
-    const code = $('#incoming-trade-input', wrap).value.trim();
-    if(!code) { toast('Please paste a valid trade code'); return; }
-    try {
-      const decoded = JSON.parse(atob(code));
-      if(!decoded.collection) throw new Error();
-      const map = getCollectionsMap();
-      let importedName = `Trade from ${decoded.sender || 'Collector'}`;
-      let uniqueName = importedName;
-      let c = 1;
-      while(map[uniqueName]) { uniqueName = `${importedName} (${c++})`; }
-      map[uniqueName] = decoded.collection;
+      // Deduct card from binder
+      cardObj.count--;
+      if(cardObj.count <= 0) {
+        delete coll[selectedId];
+      }
+      map[activeName] = coll;
       store.set('user_collections', map);
-      toast(`Trade accepted! Added binder "${uniqueName}" to your collection.`);
-      $('#incoming-trade-input', wrap).value = '';
-    } catch(err) {
-      toast('Invalid trade code format.');
-    }
-  });
+      
+      toast(`Successfully sent ${cardObj.name} to ${recipient}!`);
+      $('#trade-recipient-input', wrap).value = '';
+      render('trade');
+    });
+  }
 }
 
 function openGetCreditsModal(lowBalance=false){
