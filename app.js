@@ -14,14 +14,70 @@ const CONFIG = {
     GUEST_CREDITS: 450*5,
     REFERRAL_BONUS: 250,
     PREMIUM_TIERS: [
-      { key:'starter', label:'Starter', price:'$4.99/mo', dailyCredits:350  },
-      { key:'plus',    label:'Plus',    price:'$14.99/mo', dailyCredits:1000 },
-      { key:'pro',     label:'Pro',     price:'$29.99/mo', dailyCredits:2000 },
-      { key:'elite',   label:'Elite',   price:'$49.99/mo', dailyCredits:3350 },
+      { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
+      { key:'plus',    label:'Plus',    price:'$6.99/mo', dailyCredits:10000 },
+      { key:'pro',     label:'Pro',     price:'$13.99/mo', dailyCredits:20000 },
+      { key:'elite',   label:'Elite',   price:'$24.49/mo', dailyCredits:33500 },
       { key:'vip',     label:'VIP',     price:'$99.99/mo', unlimited:true    },
     ],
   },
 };
+
+/* ============================================================
+   Dynamic Styles Injection
+   ============================================================ */
+const customStyles = document.createElement('style');
+customStyles.innerHTML = `
+.account-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.badge-guest { background: #64748b; color: #fff; }
+.badge-free { background: #475569; color: #cbd5e1; }
+.badge-bronze { background: #b45309; color: #fff; }
+.badge-gold { background: #eab308; color: #0f172a; }
+.badge-pro { background: #3b82f6; color: #fff; }
+.badge-elite { background: #8b5cf6; color: #fff; }
+.badge-vip { 
+  background: linear-gradient(135deg, #f59e0b, #ef4444, #8b5cf6); 
+  color: #fff; 
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.account-card {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 10px;
+}
+.account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+.account-header h3 { margin: 0; }
+.account-details p {
+  margin: 8px 0;
+  color: var(--dim);
+}
+.search-bar-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.search-bar-wrap input {
+  flex: 1;
+}
+`;
+document.head.appendChild(customStyles);
 
 /* ============================================================
    Supabase client
@@ -330,9 +386,14 @@ function render(name, params={}){
   route = { name, params };
   app.innerHTML = '';
   app.appendChild(renderTopbar());
+  
   if(name==='home') renderHome();
   if(name==='set') renderSetDetail(params.set);
   if(name==='collection') renderCollection();
+  if(name==='search') renderSearch();
+  if(name==='profile') renderProfile();
+  if(name==='user_collection') renderUserCollection(params.userId, params.username);
+  
   app.appendChild(renderTabs());
 }
 
@@ -515,6 +576,8 @@ function renderTabs(){
   const items = [
     { key:'home', label:'Packs', icon:'M4 12l8-8 8 8M6 10v10h12V10' },
     { key:'collection', label:'Collection', icon:'M4 6h16M4 12h16M4 18h16' },
+    { key:'search', label:'Search', icon:'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
+    { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
   ];
   items.forEach(it=>{
     const t = el('div','tab'+(route.name===it.key?' active':''));
@@ -523,6 +586,213 @@ function renderTabs(){
     tabs.appendChild(t);
   });
   return tabs;
+}
+
+/**
+ * Helper to determine the user's readable account type label and CSS class
+ */
+function getAccountTypeBadge(user, profile) {
+  if (!user) {
+    return { label: 'Guest', cssClass: 'badge-guest' };
+  }
+  
+  const tier = (profile?.premium_tier || 'free').toLowerCase();
+
+  switch (tier) {
+    case 'vip':
+      return { label: '👑 VIP Admin', cssClass: 'badge-vip' };
+    case 'elite':
+      return { label: '💎 Elite VIP', cssClass: 'badge-elite' };
+    case 'pro':
+      return { label: '🔥 Pro Member', cssClass: 'badge-pro' };
+    case 'plus':
+    case 'gold':
+      return { label: '🥇 Gold Tier', cssClass: 'badge-gold' };
+    case 'starter':
+    case 'bronze':
+      return { label: '🥉 Bronze Tier', cssClass: 'badge-bronze' };
+    default:
+      return { label: 'Free Account', cssClass: 'badge-free' };
+  }
+}
+
+function renderAccountArea(user, userProfile) {
+  const badge = getAccountTypeBadge(user, userProfile);
+  
+  const accountHtml = `
+    <div class="account-card">
+      <div class="account-header">
+        <h3>${user ? user.email : 'Guest Session'}</h3>
+        <span class="account-badge ${badge.cssClass}">${badge.label}</span>
+      </div>
+      <div class="account-details">
+        <p><strong>Credits:</strong> ${userProfile?.credits?.toLocaleString() || 0}</p>
+        <p><strong>Status:</strong> ${userProfile?.is_premium ? 'Active Subscription' : 'Standard'}</p>
+      </div>
+    </div>
+  `;
+  
+  const accountSection = document.getElementById('account-section');
+  if (accountSection) {
+      accountSection.innerHTML = accountHtml;
+  }
+}
+
+async function renderProfile() {
+  const wrap = el('div');
+  wrap.innerHTML = `
+      <div class="section-title">My Account</div>
+      <div id="account-section"></div>
+  `;
+  app.appendChild(wrap);
+
+  if (!session && guestMode) {
+      wrap.querySelector('#account-section').innerHTML = `
+          <div class="account-card" style="text-align:center;">
+              <div class="account-header" style="justify-content:center; border-bottom:none;">
+                  <span class="account-badge badge-guest" style="font-size:1rem; padding:8px 16px;">Guest Session</span>
+              </div>
+              <div class="account-details">
+                  <p>Create an account to save your collection, follow other collectors, and claim daily rewards.</p>
+                  <button class="btn btn-primary" id="profile-login-btn" style="width:100%; margin-top:12px;">Sign Up / Log In</button>
+              </div>
+          </div>
+      `;
+      $('#profile-login-btn', wrap)?.addEventListener('click', () => exitGuestMode());
+      return;
+  }
+  
+  // Call the robust renderAccountArea helper function
+  setTimeout(() => {
+    renderAccountArea(session?.user, profile);
+  }, 0);
+}
+
+async function renderSearch() {
+  const wrap = el('div');
+  wrap.innerHTML = `
+    <div class="section-title">Search Card Pulls</div>
+    <div class="search-bar-wrap">
+      <input type="text" id="search-input" placeholder="Search a card name..." class="auth-form" style="width:auto;" />
+      <button class="btn btn-primary" id="search-btn">Search</button>
+    </div>
+    <div id="search-results" style="display:flex; flex-direction:column; gap:10px;"></div>
+  `;
+  app.appendChild(wrap);
+
+  $('#search-btn', wrap).addEventListener('click', async () => {
+     const query = $('#search-input', wrap).value.trim();
+     if (!query) return;
+     
+     const resultsDiv = $('#search-results', wrap);
+     resultsDiv.innerHTML = '<div class="hint">Searching database...</div>';
+     
+     try {
+        const { data, error } = await sb.rpc('search_card_owners', { p_card_query: query });
+        if (error) throw error;
+        
+        if (!data || data.length === 0) {
+            resultsDiv.innerHTML = '<div class="hint">No public pulls found for this search.</div>';
+            return;
+        }
+        
+        resultsDiv.innerHTML = '';
+        data.forEach(item => {
+           const card = el('div', 'refer-box'); 
+           card.style.display = 'flex';
+           card.style.alignItems = 'center';
+           card.style.cursor = 'pointer';
+           card.innerHTML = `
+              <img src="${item.card_image || ''}" style="width:44px; height:62px; object-fit:cover; border-radius:4px; margin-right:12px;" />
+              <div style="flex:1;">
+                 <div style="font-weight:bold; font-size:14px; margin-bottom:2px;">${item.card_name}</div>
+                 <div class="hint" style="color:var(--dim);">Pulled by: ${item.username || 'User'}</div>
+              </div>
+              <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;">View Collection</button>
+           `;
+           card.addEventListener('click', () => render('user_collection', { userId: item.user_id, username: item.username }));
+           resultsDiv.appendChild(card);
+        });
+     } catch (err) {
+        resultsDiv.innerHTML = '<div class="hint" style="color:var(--danger)">Error querying the database. Please try again.</div>';
+     }
+  });
+}
+
+async function renderUserCollection(targetUserId, username) {
+  const wrap = el('div');
+  wrap.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;">
+      <div class="section-title" style="margin:0;">${username || 'User'}'s Collection</div>
+      <button class="btn btn-secondary" id="follow-btn" style="padding:6px 14px; font-size:12px; display:none;">Follow</button>
+    </div>
+    <div id="user-coll-grid" class="collection-grid"></div>
+  `;
+  app.appendChild(wrap);
+
+  const grid = $('#user-coll-grid', wrap);
+  grid.innerHTML = '<div class="hint" style="grid-column:1/-1;">Loading collection...</div>';
+
+  try {
+     const { data: pulls, error: pullsErr } = await sb.from('openings').select('cards').eq('user_id', targetUserId);
+     if (pullsErr) throw pullsErr;
+     
+     const coll = {};
+     (pulls || []).forEach(opening => {
+        (opening.cards || []).forEach(c => {
+           coll[c.id] = coll[c.id] || { name:c.name, image:c.image, rarity:c.rarity, count:0 };
+           coll[c.id].count++;
+        });
+     });
+
+     const keys = Object.keys(coll);
+     if (!keys.length) {
+        grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">This user has no cards yet.</div>';
+     } else {
+        grid.innerHTML = '';
+        keys.sort((a,b)=> classify(coll[b].rarity).id - classify(coll[a].rarity).id).forEach(id=>{
+          const c = coll[id]; const item = el('div','coll-item');
+          item.innerHTML = `<img src="${c.image}"/><span class="count">×${c.count}</span>`;
+          item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), c));
+          grid.appendChild(item);
+        });
+     }
+
+     if (session && session.user.id !== targetUserId) {
+         const followBtn = $('#follow-btn', wrap);
+         followBtn.style.display = 'block';
+
+         const { data: followData } = await sb.from('follows')
+            .select('*')
+            .eq('follower_id', session.user.id)
+            .eq('following_id', targetUserId)
+            .single();
+
+         let isFollowing = !!followData;
+         followBtn.textContent = isFollowing ? 'Unfollow' : 'Follow';
+         followBtn.className = isFollowing ? 'btn btn-secondary' : 'btn btn-primary';
+
+         followBtn.addEventListener('click', async () => {
+             followBtn.disabled = true;
+             try {
+                 if (isFollowing) {
+                     await sb.from('follows').delete().eq('follower_id', session.user.id).eq('following_id', targetUserId);
+                     isFollowing = false;
+                 } else {
+                     await sb.from('follows').insert({ follower_id: session.user.id, following_id: targetUserId });
+                     isFollowing = true;
+                 }
+                 followBtn.textContent = isFollowing ? 'Unfollow' : 'Follow';
+                 followBtn.className = isFollowing ? 'btn btn-secondary' : 'btn btn-primary';
+             } catch(e) {
+                 toast('Action failed');
+             }
+             followBtn.disabled = false;
+         });
+     }
+  } catch(err) {
+     grid.innerHTML = '<div class="hint" style="grid-column:1/-1; color:var(--danger)">Error loading user collection.</div>';
+  }
 }
 
 function renderPremiumBanner(claimedToday){
