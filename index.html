@@ -108,9 +108,6 @@ create policy "own openings" on openings for all using (auth.uid() = user_id);
    const session = await stripe.checkout.sessions.create({
      mode: 'payment',
      line_items: [{ price: PRICES[bundle], quantity: 1 }],
-     // automatic_payment_methods surfaces Google Pay / Apple Pay / Link /
-     // card automatically based on the buyer's device+browser — this is
-     // what gives the one-tap "seamless" checkout, no extra config needed.
      automatic_payment_methods: { enabled: true },
      client_reference_id: user.id,
      metadata: { user_id: user.id, bundle },
@@ -121,13 +118,11 @@ create policy "own openings" on openings for all using (auth.uid() = user_id);
  });
 
  ---- functions/stripe-webhook/index.ts ----
- // Listens for checkout.session.completed, verifies the Stripe signature,
- // and is the ONLY place credits ever get added for a real purchase.
  import Stripe from 'npm:stripe';
  import { createClient } from 'npm:@supabase/supabase-js@2';
  const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
  const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
- const CREDIT_AMOUNTS = { starter: 500, booster: 2200, elite: 6000 }; // matches CONFIG.ECONOMY.BUNDLES
+ const CREDIT_AMOUNTS = { starter: 500, booster: 2200, elite: 6000 };
  Deno.serve(async (req) => {
    const sig = req.headers.get('stripe-signature')!;
    const body = await req.text();
@@ -141,21 +136,16 @@ create policy "own openings" on openings for all using (auth.uid() = user_id);
  });
 
  ---- functions/create-subscription-checkout/index.ts ----
- // Creates a recurring Stripe subscription checkout for Premium.
- // Reuses the existing Stripe customer if the user already has one on file
- // (stored in profiles.stripe_customer_id) so repeat subscribers don't get
- // duplicate customer records.
  import Stripe from 'npm:stripe';
  import { createClient } from 'npm:@supabase/supabase-js@2';
  const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
- // One Stripe Price per tier — map your four Price ids here via env vars.
  const TIER_PRICE_ENV = { starter: 'STRIPE_PRICE_STARTER', plus: 'STRIPE_PRICE_PLUS', pro: 'STRIPE_PRICE_PRO', elite: 'STRIPE_PRICE_ELITE' };
  Deno.serve(async (req) => {
    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
      { global: { headers: { Authorization: req.headers.get('Authorization')! } } });
    const { data: { user } } = await sb.auth.getUser();
    if (!user) return new Response('unauthorized', { status: 401 });
-   const { tier } = await req.json(); // 'starter' | 'plus' | 'pro' | 'elite'
+   const { tier } = await req.json();
    const priceEnvKey = TIER_PRICE_ENV[tier];
    if (!priceEnvKey) return new Response('bad_tier', { status: 400 });
    const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -175,8 +165,6 @@ create policy "own openings" on openings for all using (auth.uid() = user_id);
  });
 
  ---- functions/create-billing-portal-session/index.ts ----
- // Lets a subscriber manage, upgrade/downgrade tiers, or cancel from
- // Stripe's hosted portal.
  import Stripe from 'npm:stripe';
  import { createClient } from 'npm:@supabase/supabase-js@2';
  const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
@@ -196,13 +184,6 @@ create policy "own openings" on openings for all using (auth.uid() = user_id);
  });
 
  ---- functions/stripe-webhook/index.ts (extended) ----
- // Handles subscription lifecycle. checkout.session.completed (mode=
- // subscription) turns Premium on at the chosen tier and saves the Stripe
- // customer id. customer.subscription.updated catches tier changes (the
- // customer switched plans in the billing portal) by reading the new
- // Price id back off the subscription and mapping it to a tier.
- // customer.subscription.deleted (cancelled, or payment finally failed
- // after Stripe's retry schedule) turns Premium off entirely.
  import Stripe from 'npm:stripe';
  import { createClient } from 'npm:@supabase/supabase-js@2';
  const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
@@ -235,28 +216,6 @@ create policy "own openings" on openings for all using (auth.uid() = user_id);
    }
    return new Response('ok', { status: 200 });
  });
-
- A NOTE ON LEGALITY BEFORE YOU TURN THIS ON FOR REAL MONEY:
- - Premium is a flat recurring subscription for a fixed, guaranteed daily
-   credit drip (not a lump sum) plus guaranteed perks (referral multiplier,
-   cosmetic foil) — nothing about the payment itself is chance-based, so it
-   sits well outside loot-box regulation. This is the low-risk path; the
-   one-time credit bundles further down are the loot-box-adjacent one and
-   should stay off until reviewed.
- - Needs four Stripe Price objects (one per tier); put their ids in the
-   STRIPE_PRICE_STARTER / STRIPE_PRICE_PLUS / STRIPE_PRICE_PRO /
-   STRIPE_PRICE_ELITE env vars, shared across all three functions above.
- - Chance-based digital purchases (this is effectively a loot box) sit in
-   Stripe's "restricted businesses" review bucket in some categorizations —
-   contact Stripe support/underwriting before going live so your account
-   isn't frozen mid-launch. Don't assume silence means approval.
- - Several jurisdictions regulate or ban loot-box mechanics tied to real
-   money for minors specifically (and Belgium/Netherlands have broader
-   restrictions). At minimum: require an 18+ age confirmation before first
-   purchase, state your odds where the buyer sees them before paying (you
-   already show them), and don't market this as gambling.
- - None of this is legal advice — for a real launch, worth 30 minutes with
-   an actual lawyer given the loot-box angle specifically.
 ==============================================================================
 -->
 
@@ -353,7 +312,7 @@ input:focus{outline:none; border-color:var(--cyan);}
 /* Core Pack Art Layer */
 .pack-art-bg{position:absolute; inset:0; z-index:2; transition:background-image 0.3s ease;}
 
-/* Premium Fallback UI (when GitHub repo lacks the image) */
+/* Premium Fallback UI (when missing dynamic pack art) */
 .is-fallback .pack-art-bg {
   background: linear-gradient(135deg, #1c2130, #0a0d14);
 }
@@ -562,10 +521,10 @@ const ImgCache = {
       console.warn('Persistent caching failed, falling back to basic preloader', e);
     }
     
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => { this.blobUrls[url] = url; resolve(url); };
-      img.onerror = () => { this.blobUrls[url] = url; resolve(url); };
+      img.onerror = () => reject(new Error('Image missing'));
       img.src = url;
     });
   },
@@ -575,35 +534,9 @@ const ImgCache = {
 /* ============================================================
    Sound design & Confetti
    ============================================================ */
-let actx;
-function audioCtx(){ if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); return actx; }
-function tone(freq, dur, type='sine', gain=0.05, delay=0){
-  const ctx = audioCtx(); const t0 = ctx.currentTime + delay;
-  const osc = ctx.createOscillator(); const g = ctx.createGain();
-  osc.type = type; osc.frequency.setValueAtTime(freq, t0);
-  g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(gain, t0+0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
-  osc.connect(g).connect(ctx.destination); osc.start(t0); osc.stop(t0+dur+0.02);
-}
-function noiseBurst(dur=0.25, gain=0.06){
-  const ctx = audioCtx(); const bufferSize = ctx.sampleRate * dur;
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for(let i=0;i<bufferSize;i++) data[i] = (Math.random()*2-1) * (1 - i/bufferSize);
-  const src = ctx.createBufferSource(); src.buffer = buffer;
-  const filt = ctx.createBiquadFilter(); filt.type = 'highpass'; filt.frequency.value = 800;
-  const g = ctx.createGain(); g.gain.setValueAtTime(gain, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+dur);
-  src.connect(filt).connect(g).connect(ctx.destination); src.start();
-}
+// Audio SFX removed; methods stubbed to prevent runtime errors
 const SFX = {
-  flip(){ tone(320,0.09,'triangle',0.04); tone(480,0.07,'triangle',0.03,0.03); },
-  common(){ tone(280,0.15,'sine',0.03); },
-  uncommon(){ tone(340,0.12,'sine',0.04); tone(460,0.14,'sine',0.03,0.05); },
-  holo(){ tone(392,0.15,'sine',0.05); tone(523,0.18,'sine',0.045,0.06); tone(659,0.22,'sine',0.04,0.12); },
-  hit(){ [523,659,784,1047].forEach((f,i)=>tone(f,0.28,'triangle',0.05,i*0.07)); },
-  chase(){ [392,494,587,698,880,1047,1175].forEach((f,i)=>tone(f,0.35,'sawtooth',0.035,i*0.06)); },
-  coin(){ tone(880,0.08,'square',0.03); tone(1100,0.09,'square',0.03,0.05); },
-  tear(){ noiseBurst(0.4,0.05); tone(200,0.3,'sawtooth',0.02,0.05); },
+  flip(){}, common(){}, uncommon(){}, holo(){}, hit(){}, chase(){}, coin(){}, tear(){}
 };
 
 const confettiCanvas = $('#confetti'); const cctx = confettiCanvas.getContext('2d');
@@ -1037,29 +970,24 @@ async function renderSetDetail(setMeta){
       const idLower = setMeta.id.toLowerCase();
       const idUpper = setMeta.id.toUpperCase();
       const cleanName = setMeta.name.replace(/[^a-zA-Z0-9 -]/g, '').trim();
+      const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
       
-      // Exhaustive candidate list to hit GitHub variations
+      // Dynamic resolution hierarchy targeting TCGdex API and raw GitHub assets
       const assetCandidates = [
-        `https://assets.tcgdex.net/en/${idLower}/pack/high.webp`,
+        tcgdexBase ? `${tcgdexBase}/pack/high.webp` : null,
         `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${encodeURIComponent(setMeta.name)}.png`,
         `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${encodeURIComponent(cleanName)}.png`,
         `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${idLower}.png`,
         `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${idUpper}.png`,
         `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${encodeURIComponent(setMeta.name)}.jpg`,
         `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${idLower}.jpg`
-      ];
+      ].filter(Boolean);
 
       let loadedSrc = '';
       for(const candidateUrl of assetCandidates) {
         try {
           const resolved = await ImgCache.get(candidateUrl);
           if(resolved) {
-            await new Promise((resolve, reject) => {
-              const testImg = new Image();
-              testImg.onload = () => resolve(true);
-              testImg.onerror = () => reject(false);
-              testImg.src = resolved;
-            });
             loadedSrc = resolved;
             break;
           }
@@ -1074,14 +1002,13 @@ async function renderSetDetail(setMeta){
         packArt.classList.remove('is-fallback');
         setMeta.resolvedPackArt = loadedSrc; 
       } else {
-        // Force the fallback UI cleanly, hide the redundant top logo
         packArt.classList.add('is-fallback');
         const hl = $('#hero-logo', wrap);
         if(hl) hl.style.display = 'none';
       }
     }
     if(feature?.images?.large){ ImgCache.get(feature.images.large); }
-  }catch(e){ /* silently gracefully defaults to the fallback */ }
+  }catch(e){ /* silently defaults to the fallback presentation */ }
 }
 let setDetailCardsCache = null, setDetailCardsCacheSetId = null;
 
@@ -1115,7 +1042,6 @@ async function beginOpen(setMeta){
 
     const pack = generatePack(cards);
     
-    // 🔥 SUPER-CACHE PHASE 🔥 
     btn.textContent = 'Downloading pack art...';
     
     const urlsToPrefetch = [setMeta.images.logo];
