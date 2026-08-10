@@ -822,9 +822,6 @@ function openAuthModal(resumeSetMeta = null){
             <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
             Continue with Google
           </button>
-          <button class="btn btn-secondary" type="button" id="passkey-auth-btn" style="display:flex; align-items:center; justify-content:center; gap:8px;">
-            👤 Continue with Passkey / Face ID
-          </button>
           <button class="btn btn-secondary" type="button" id="email-view-btn" style="display:flex; align-items:center; justify-content:center; gap:8px;">
             ✉️ Continue with Email & Password
           </button>
@@ -849,12 +846,6 @@ function openAuthModal(resumeSetMeta = null){
           errBox.style.color = '#ff6b6b';
           errBox.textContent = error.message;
       }
-    });
-
-    $('#passkey-auth-btn', sheet).addEventListener('click', async () => {
-      errBox.style.color = 'var(--cyan)'; 
-      errBox.textContent = 'Passkeys require HTTPS domain configuration in Supabase Auth settings. Use Email or Google for immediate access.';
-      toast('Passkey authentication requires Supabase WebAuthn setup.');
     });
 
     $('#email-view-btn', sheet).addEventListener('click', renderEmailView);
@@ -1263,6 +1254,19 @@ async function renderUserCollection(targetUserId, username) {
 
 async function renderHome(){
   const setsWrap = el('div');
+
+  if(!store.get('seen_welcome')){
+    const welcome = el('div');
+    welcome.style.cssText = 'background:var(--panel); border:1px solid var(--edge); border-radius:14px; padding:16px; margin-bottom:16px; position:relative;';
+    welcome.innerHTML = `
+      <button id="dismiss-welcome" style="position:absolute; top:10px; right:10px; width:28px; height:28px; border-radius:50%; background:var(--panel-2); color:var(--dim); display:flex; align-items:center; justify-content:center; font-size:14px;">✕</button>
+      <div style="font-family:var(--font-display); font-weight:700; font-size:17px; margin-bottom:4px;">Welcome to Chase Cards 👋</div>
+      <div style="color:var(--dim); font-size:13.5px; line-height:1.5;">Rip open real Pokémon booster packs using free credits — no purchase needed. Pick a set below, tear the pack, and see what you pull. Credits are virtual and never cost real money.</div>
+    `;
+    $('#dismiss-welcome', welcome).addEventListener('click', ()=>{ store.set('seen_welcome', true); welcome.remove(); });
+    setsWrap.appendChild(welcome);
+  }
+
   setsWrap.appendChild(el('div','section-title','Choose a booster (Oldest → Newest)'));
   const gridHolder = el('div'); gridHolder.innerHTML = `<div class="set-grid" id="set-grid"></div>`;
   setsWrap.appendChild(gridHolder.firstChild);
@@ -1559,7 +1563,7 @@ function openRevealScreen(setMeta, pack, bgUrl){
     </div>
     <div class="stage"><div class="flipcard" id="flipcard">
       <div class="face back"></div>
-      <div class="face front"><img id="front-img" src="" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" alt=""/><div class="foil-layer" id="foil"></div><div class="tier-badge" id="tier-badge"></div></div>
+      <div class="face front"><img id="front-img" src="" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" alt=""/><div class="tier-badge" id="tier-badge"></div></div>
     </div></div>
     <div class="card-name" id="card-name">&nbsp;</div>
     <div class="card-sub" id="card-sub">&nbsp;</div>
@@ -1622,8 +1626,7 @@ function openRevealScreen(setMeta, pack, bgUrl){
         const nb = el('div','new-badge','NEW'); $('.face.front', screen).appendChild(nb);
       } else { $('.face.front .new-badge', screen)?.remove(); }
       $('#buy-slot', screen).innerHTML = '';
-      const flip = $('#flipcard', screen); flip.classList.remove('flipped','rare-fx');
-      if(tier.id >= 3) flip.classList.add('rare-fx');
+      const flip = $('#flipcard', screen); flip.classList.remove('flipped');
       if(!guestMode && profile?.is_premium) flip.classList.add(isAdminUser() ? 'vip-fx' : 'premium-fx');
       $('#tap-hint', screen).textContent = 'Tap the card to flip it';
       flip.dataset.done = '0';
@@ -1631,14 +1634,6 @@ function openRevealScreen(setMeta, pack, bgUrl){
     function markDot(i, tier){
       const dot = dotsWrap.children[i]; dot.classList.add('done'); if(tier>=4) dot.classList.add('hit');
     }
-    function foilTilt(e){
-      const flip = $('#flipcard', screen); if(!flip.classList.contains('rare-fx')) return;
-      const rect = flip.getBoundingClientRect();
-      const cx = (e.touches?e.touches[0].clientX:e.clientX) - rect.left, cy = (e.touches?e.touches[0].clientY:e.clientY) - rect.top;
-      const ang = Math.atan2(cy-rect.height/2, cx-rect.width/2) * 180/Math.PI;
-      $('#foil', screen).style.setProperty('--ang', ang+'deg');
-    }
-    screen.addEventListener('pointermove', foilTilt);
     showCard(0);
 
     $('#flipcard', screen).addEventListener('click', function(){
