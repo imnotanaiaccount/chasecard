@@ -525,19 +525,19 @@ async function getSets(){
       if (s.releaseDate) {
         const year = parseInt(s.releaseDate.split(/[-/]/)[0], 10);
         if (!isNaN(year)) {
-          let multiplier = 10;
+          let multiplier = 15;
           if (year < 2000) {
-            multiplier = 50;
+            multiplier = 55;
           } else if (year >= 2000 && year <= 2004) {
-            multiplier = 30;
+            multiplier = 40;
           } else if (year >= 2005 && year <= 2007) {
-            multiplier = 25;
+            multiplier = 30;
           } else if (year >= 2008 && year <= 2010) {
-            multiplier = 20;
+            multiplier = 25;
           } else if (year >= 2011 && year <= 2014) {
-            multiplier = 15;
+            multiplier = 20;
           } else {
-            multiplier = 10;
+            multiplier = 15;
           }
           cost *= multiplier;
         }
