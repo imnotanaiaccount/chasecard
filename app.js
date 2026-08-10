@@ -275,7 +275,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('packpull-images-v3-comprehensive');
+        const cache = await caches.open('packpull-images-v4-pokemontcg');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -335,17 +335,17 @@ function tickConfetti(){
 }
 
 /* ============================================================
-   TCGdex API & Dynamic Pack Pricing Formula
+   Pokémon TCG API v2 & Dynamic Pack Pricing Formula
    ============================================================ */
-const TCG_BASE = 'https://api.tcgdex.net/v2/en';
-async function tcgFetch(path, attempt=1){
+const POKE_API_BASE = 'https://api.pokemontcg.io/v2';
+async function pokeFetch(endpoint, attempt=1){
   showLoader();
   const ctrl = new AbortController();
   const timeout = setTimeout(()=>ctrl.abort(), 10000);
   try{
-    const res = await fetch(TCG_BASE + path, { signal: ctrl.signal });
+    const res = await fetch(`${POKE_API_BASE}${endpoint}`, { signal: ctrl.signal });
     if(!res.ok){
-      const err = new Error('TCGdex API error ' + res.status);
+      const err = new Error('Pokémon TCG API error ' + res.status);
       err.status = res.status;
       throw err;
     }
@@ -353,7 +353,7 @@ async function tcgFetch(path, attempt=1){
   }catch(e){
     if(attempt < 3 && (e.name==='AbortError' || e.status>=500 || !e.status)){
       await new Promise(r=>setTimeout(r, attempt*1000));
-      return tcgFetch(path, attempt+1);
+      return pokeFetch(endpoint, attempt+1);
     }
     throw e;
   }finally{ 
@@ -361,7 +361,6 @@ async function tcgFetch(path, attempt=1){
     hideLoader();
   }
 }
-function tcgAssetUrl(base, quality, ext){ return `${base}/${quality}.${ext}`; }
 
 let globalSortedSets = [];
 
@@ -375,21 +374,24 @@ function calculatePackCost(index, totalSets) {
 }
 
 async function getSets(){
-  const cached = store.get('cache_sets');
+  const cached = store.get('cache_sets_v2');
   if(cached && Date.now() - cached.t < 1000*60*60*12) {
     globalSortedSets = cached.data;
     return cached.data;
   }
   try{
-    const raw = await tcgFetch('/sets');
-    let data = raw
-      .filter(s => s.cardCount?.total > 0)
-      .sort((a,b)=> (a.id > b.id ? 1 : -1))
-      .map(s => ({
-        id: s.id, name: s.name, series: s.serie?.name || '',
-        total: s.cardCount?.total || s.cardCount?.official || 0,
-        images: { symbol: s.symbol ? s.symbol + '.png' : '', logo: s.logo ? s.logo + '.png' : '' },
-      }));
+    const raw = await pokeFetch('/sets?orderBy=-releaseDate');
+    let setsData = raw.data || [];
+    // Sort oldest to newest
+    setsData.sort((a,b)=> new Date(a.releaseDate) - new Date(b.releaseDate));
+    
+    let data = setsData.map(s => ({
+      id: s.id, 
+      name: s.name, 
+      series: s.series || '',
+      total: s.total || s.printedTotal || 0,
+      images: { symbol: s.images?.symbol || '', logo: s.images?.logo || '' },
+    }));
     
     const totalCount = data.length;
     data = data.map((s, idx) => ({
@@ -398,7 +400,7 @@ async function getSets(){
     }));
 
     globalSortedSets = data;
-    store.set('cache_sets', { t: Date.now(), data });
+    store.set('cache_sets_v2', { t: Date.now(), data });
     return data;
   }catch(e){
     if(cached){ toast('Showing cached sets — live data unavailable'); globalSortedSets = cached.data; return cached.data; }
@@ -406,37 +408,22 @@ async function getSets(){
   }
 }
 
-async function mapWithConcurrency(items, limit, fn){
-  const results = new Array(items.length);
-  let i = 0;
-  async function worker(){
-    while(i < items.length){
-      const idx = i++;
-      results[idx] = await fn(items[idx]);
-    }
-  }
-  await Promise.all(Array.from({length: Math.min(limit, items.length)}, worker));
-  return results;
-}
-
 async function getCardsForSet(setId){
-  const key = 'cache_cards_' + setId;
+  const key = 'cache_cards_v2_' + setId;
   const cached = store.get(key);
   if(cached && Date.now() - cached.t < 1000*60*60*24*7) return cached.data;
   try{
-    const setData = await tcgFetch(`/sets/${setId}`);
-    const briefCards = setData.cards || [];
-    const fullCards = await mapWithConcurrency(briefCards, 12, async (bc)=>{
-      try{ return await tcgFetch(`/cards/${bc.id}`); }
-      catch(e){ return null; }
-    });
-    const data = fullCards.filter(Boolean).map(c => ({
-      id: c.id, name: c.name, rarity: c.rarity,
+    const raw = await pokeFetch(`/cards?q=set.id:${setId}&pageSize=250`);
+    const rawCards = raw.data || [];
+    const data = rawCards.map(c => ({
+      id: c.id, 
+      name: c.name, 
+      rarity: c.rarity,
       images: {
-        small: c.image ? tcgAssetUrl(c.image, 'low', 'webp') : '',
-        large: c.image ? tcgAssetUrl(c.image, 'high', 'webp') : '',
+        small: c.images?.small || '',
+        large: c.images?.large || '',
       },
-      set: { name: c.set?.name || setData.name },
+      set: { name: c.set?.name || setId },
     }));
     store.set(key, { t: Date.now(), data });
     return data;
@@ -511,7 +498,7 @@ let session = null, profile = null, guestMode = false;
 
 function getGuestState(){ 
   let s = store.get('guest_state', null);
-  if(!s || typeof s.credits !== 'number' || isNaN(s.credits)) {
+  if(!s || typeof s.credits !== 'number' || isNaN(s.credits) || s.credits <= 0) {
     s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false };
     store.set('guest_state', s);
   }
@@ -522,7 +509,7 @@ function setGuestState(s){ store.set('guest_state', s); }
 function startGuestSession(redirect=true){
   guestMode = true;
   let s = getGuestState();
-  if(isNaN(s.credits)){ 
+  if(isNaN(s.credits) || s.credits <= 0){ 
     s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false }; 
     setGuestState(s); 
   }
@@ -1191,7 +1178,6 @@ async function renderSetDetail(setMeta){
     
     const gallery = $('#pack-gallery', wrap);
     const idLower = setMeta.id.toLowerCase();
-    const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
     
     let rawUrls = [];
     try {
@@ -1208,7 +1194,7 @@ async function renderSetDetail(setMeta){
     rawUrls.push(
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
-      tcgdexBase ? `${tcgdexBase}/pack/high.webp` : null
+      setMeta.images.logo || null
     );
     rawUrls = rawUrls.filter(Boolean);
 
