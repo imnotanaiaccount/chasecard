@@ -4,7 +4,7 @@
 const CONFIG = {
   SUPABASE_URL: 'https://mdtpdqwxegmseidxnnvb.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kdHBkcXd4ZWdtc2VpZHhubnZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMTEzMzEsImV4cCI6MjEwMTg4NzMzMX0.ZWkYKmt6N7-0jqwEMB4Zn9H1BDUvGPZb1EsEAS7VRBI',
-  APP_URL: 'https://chasecards.netlify.app/',
+  APP_URL: window.location.origin + '/',
   CHECKOUT_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-checkout-session',
   SUBSCRIBE_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-subscription-checkout',
   BILLING_PORTAL_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-billing-portal-session',
