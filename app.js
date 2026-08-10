@@ -11,7 +11,6 @@ const CONFIG = {
   
   ECONOMY: {
     STARTING_CREDITS: 500,
-    PACK_COST: 450,
     GUEST_CREDITS: 450*5,
     REFERRAL_BONUS: 250,
     PREMIUM_TIERS: [
@@ -25,7 +24,7 @@ const CONFIG = {
 };
 
 /* ============================================================
-   Dynamic Styles Injection
+   Dynamic Styles Injection (Includes Loading Bar & Adjustments)
    ============================================================ */
 const customStyles = document.createElement('style');
 customStyles.innerHTML = `
@@ -77,8 +76,54 @@ customStyles.innerHTML = `
 .search-bar-wrap input {
   flex: 1;
 }
+
+/* Global Network Loading Bar */
+#global-loader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: transparent;
+  z-index: 9999;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#global-loader.active {
+  opacity: 1;
+}
+#global-loader::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--cyan, #4de8e0), transparent);
+  animation: loadbar 1.2s infinite linear;
+}
+@keyframes loadbar {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
 `;
 document.head.appendChild(customStyles);
+
+// Inject Global Loader DOM element
+const globalLoader = document.createElement('div');
+globalLoader.id = 'global-loader';
+document.body.appendChild(globalLoader);
+
+let activeRequests = 0;
+function showLoader() {
+  activeRequests++;
+  if (activeRequests === 1) globalLoader.classList.add('active');
+}
+function hideLoader() {
+  activeRequests = Math.max(0, activeRequests - 1);
+  if (activeRequests === 0) globalLoader.classList.remove('active');
+}
 
 /* ============================================================
    Supabase client
@@ -122,7 +167,7 @@ function showCardFullscreen(imgSrc, cardObj){
 }
 
 /* ============================================================
-   Image Caching System
+   Image Caching System (Everything/Every Image Cached)
    ============================================================ */
 const ImgCache = {
   blobUrls: {},
@@ -130,9 +175,10 @@ const ImgCache = {
     if (!url) return '';
     if (this.blobUrls[url]) return this.blobUrls[url];
     
+    showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('packpull-images-v1');
+        const cache = await caches.open('packpull-images-v2-comprehensive');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -142,11 +188,14 @@ const ImgCache = {
           const blob = await res.blob();
           const blobUrl = URL.createObjectURL(blob);
           this.blobUrls[url] = blobUrl;
+          hideLoader();
           return blobUrl;
         }
       }
     } catch (e) {
-      console.warn('Persistent caching failed, falling back to basic preloader', e);
+      console.warn('Persistent caching fallback triggered', e);
+    } finally {
+      hideLoader();
     }
     
     return new Promise((resolve, reject) => {
@@ -187,10 +236,11 @@ function tickConfetti(){
 }
 
 /* ============================================================
-   TCGdex API
+   TCGdex API & Dynamic Pack Pricing Formula
    ============================================================ */
 const TCG_BASE = 'https://api.tcgdex.net/v2/en';
 async function tcgFetch(path, attempt=1){
+  showLoader();
   const ctrl = new AbortController();
   const timeout = setTimeout(()=>ctrl.abort(), 10000);
   try{
@@ -207,27 +257,54 @@ async function tcgFetch(path, attempt=1){
       return tcgFetch(path, attempt+1);
     }
     throw e;
-  }finally{ clearTimeout(timeout); }
+  }finally{ 
+    clearTimeout(timeout); 
+    hideLoader();
+  }
 }
 function tcgAssetUrl(base, quality, ext){ return `${base}/${quality}.${ext}`; }
 
+let globalSortedSets = [];
+
+function calculatePackCost(index, totalSets) {
+  if (totalSets <= 1) return 150;
+  const minCost = 50;
+  const maxCost = 300;
+  // index 0 is oldest, totalSets - 1 is newest
+  // Oldest sets = most expensive (300), newest sets = cheapest (50)
+  const ratio = index / (totalSets - 1);
+  const cost = maxCost - ratio * (maxCost - minCost);
+  return Math.round(cost / 5) * 5; // rounded to nearest 5 credits
+}
+
 async function getSets(){
   const cached = store.get('cache_sets');
-  if(cached && Date.now() - cached.t < 1000*60*60*12) return cached.data;
+  if(cached && Date.now() - cached.t < 1000*60*60*12) {
+    globalSortedSets = cached.data;
+    return cached.data;
+  }
   try{
     const raw = await tcgFetch('/sets');
-    const data = raw
+    let data = raw
       .filter(s => s.cardCount?.total > 0)
-      .sort((a,b)=> (b.id > a.id ? 1 : -1))
+      .sort((a,b)=> (a.id > b.id ? 1 : -1)) // Sorted oldest to newest
       .map(s => ({
         id: s.id, name: s.name, series: s.serie?.name || '',
         total: s.cardCount?.total || s.cardCount?.official || 0,
         images: { symbol: s.symbol ? s.symbol + '.png' : '', logo: s.logo ? s.logo + '.png' : '' },
       }));
+    
+    const totalCount = data.length;
+    data = data.map((s, idx) => ({
+      ...s,
+      packCost: calculatePackCost(idx, totalCount)
+    }));
+
+    globalSortedSets = data;
     store.set('cache_sets', { t: Date.now(), data });
     return data;
   }catch(e){
-    if(cached){ toast('Showing cached sets — live data unavailable'); return cached.data; }
+    if(cached){ toast('Showing cached sets — live data unavailable'); globalSortedSets = cached.data; return cached.data; }
     throw e;
   }
 }
@@ -436,7 +513,6 @@ function openAuthModal(resumeSetMeta = null){
 
     const errBox = $('#auth-error-msg', sheet);
 
-    // 2. Google OAuth
     $('#google-auth-btn', sheet).addEventListener('click', async () => {
       errBox.style.color = 'var(--text)'; errBox.textContent = 'Redirecting to Google...';
       const { error } = await sb.auth.signInWithOAuth({
@@ -449,7 +525,6 @@ function openAuthModal(resumeSetMeta = null){
       }
     });
 
-    // 3. WebAuthn / Passkeys (Login)
     $('#passkey-auth-btn', sheet).addEventListener('click', async () => {
       errBox.style.color = 'var(--text)'; errBox.textContent = 'Waiting for Passkey...';
       try {
@@ -462,10 +537,8 @@ function openAuthModal(resumeSetMeta = null){
       }
     });
 
-    // Switch to Email & Password Form View
     $('#email-view-btn', sheet).addEventListener('click', renderEmailView);
 
-    // Guest Mode
     $('#modal-guest-btn', sheet).addEventListener('click', ()=>{
       overlay.remove();
       startGuestSession(false);
@@ -501,7 +574,6 @@ function openAuthModal(resumeSetMeta = null){
     const emailIn = $('#modal-email-input', sheet);
     const passIn = $('#modal-password-input', sheet);
 
-    // 1. Password Auth: Log In
     $('#login-pwd-btn', sheet).addEventListener('click', async () => {
       errBox.style.color = '#ff6b6b'; errBox.textContent = '';
       if(!emailIn.value || !passIn.value) return errBox.textContent = 'Enter email and password.';
@@ -521,7 +593,6 @@ function openAuthModal(resumeSetMeta = null){
       }
     });
 
-    // 1. Password Auth: Sign Up
     $('#signup-pwd-btn', sheet).addEventListener('click', async () => {
       errBox.style.color = '#ff6b6b'; errBox.textContent = '';
       if(!emailIn.value || !passIn.value) return errBox.textContent = 'Enter email and password.';
@@ -589,15 +660,11 @@ function renderTabs(){
   return tabs;
 }
 
-/**
- * Helper to determine the user's readable account type label and CSS class
- */
-function getAccountTypeBadge(user, profile) {
+function getAccountTypeBadge(user, userProfile) {
   if (!user) {
     return { label: 'Guest', cssClass: 'badge-guest' };
   }
   
-  // Check database flag instead of hardcoded emails
   if (profile?.is_admin) {
       return { label: '🛠️ System Admin', cssClass: 'badge-vip' };
   }
@@ -605,26 +672,19 @@ function getAccountTypeBadge(user, profile) {
   const tier = (profile?.premium_tier || 'free').toLowerCase();
 
   switch (tier) {
-    case 'vip':
-      return { label: '👑 VIP Member', cssClass: 'badge-vip' };
-    case 'elite':
-      return { label: '💎 Elite VIP', cssClass: 'badge-elite' };
-    case 'pro':
-      return { label: '🔥 Pro Member', cssClass: 'badge-pro' };
+    case 'vip': return { label: '👑 VIP Member', cssClass: 'badge-vip' };
+    case 'elite': return { label: '💎 Elite VIP', cssClass: 'badge-elite' };
+    case 'pro': return { label: '🔥 Pro Member', cssClass: 'badge-pro' };
     case 'plus':
-    case 'gold':
-      return { label: '🥇 Gold Tier', cssClass: 'badge-gold' };
+    case 'gold': return { label: '🥇 Gold Tier', cssClass: 'badge-gold' };
     case 'starter':
-    case 'bronze':
-      return { label: '🥉 Bronze Tier', cssClass: 'badge-bronze' };
-    default:
-      return { label: 'Free Account', cssClass: 'badge-free' };
+    case 'bronze': return { label: '🥉 Bronze Tier', cssClass: 'badge-bronze' };
+    default: return { label: 'Free Account', cssClass: 'badge-free' };
   }
 }
 
 function renderAccountArea(user, userProfile) {
   const badge = getAccountTypeBadge(user, userProfile);
-  
   const accountHtml = `
     <div class="account-card">
       <div class="account-header">
@@ -637,11 +697,8 @@ function renderAccountArea(user, userProfile) {
       </div>
     </div>
   `;
-  
   const accountSection = document.getElementById('account-section');
-  if (accountSection) {
-      accountSection.innerHTML = accountHtml;
-  }
+  if (accountSection) accountSection.innerHTML = accountHtml;
 }
 
 async function renderProfile() {
@@ -650,12 +707,15 @@ async function renderProfile() {
       <div class="section-title">My Account</div>
       <div id="account-section"></div>
       
-      <!-- Secure Admin Panel (Hidden by Default) -->
+      <!-- Secure Admin Panel with Grant & Demote Controls -->
       <div id="admin-panel" style="display:none; margin-top:30px; padding:18px; background:var(--panel-2); border:1px solid var(--vip-gold-dim); border-radius:14px; box-shadow: 0 4px 15px rgba(255, 233, 184, 0.1);">
          <h3 style="color:var(--vip-gold); margin-top:0; font-family:var(--font-display); font-size:18px;">🛠️ Admin Controls</h3>
-         <p class="hint" style="margin-bottom:14px;">Grant lifetime VIP status to any user by email.</p>
+         <p class="hint" style="margin-bottom:14px;">Manage free VIP promotions or demote users by their exact account email.</p>
          <input type="email" id="admin-target-email" placeholder="user@email.com" style="width:100%; padding:14px 16px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); margin-bottom:12px; font-family:var(--font-body);" />
-         <button class="btn btn-vip" id="admin-grant-btn" style="width:100%;">Grant VIP Status</button>
+         <div style="display:flex; gap:8px;">
+             <button class="btn btn-vip" id="admin-grant-btn" style="flex:1;">Grant VIP Status</button>
+             <button class="btn btn-secondary" id="admin-demote-btn" style="flex:1; border-color:var(--danger); color:var(--danger);">Demote to Free</button>
+         </div>
          <div id="admin-msg" class="hint" style="margin-top:12px; text-align:center; font-weight:bold; min-height:16px;"></div>
       </div>
   `;
@@ -677,33 +737,27 @@ async function renderProfile() {
       return;
   }
   
-  // Render Account Info and Handle Admin Panel Logic
   setTimeout(() => {
     renderAccountArea(session?.user, profile);
-    
-    // Check if the database profile flags the user as an admin
     if (session && profile?.is_admin) {
         const adminPanel = $('#admin-panel', wrap);
-        const adminBtn = $('#admin-grant-btn', wrap);
+        const grantBtn = $('#admin-grant-btn', wrap);
+        const demoteBtn = $('#admin-demote-btn', wrap);
         const targetInput = $('#admin-target-email', wrap);
         const msgBox = $('#admin-msg', wrap);
         
         if (adminPanel) adminPanel.style.display = 'block';
         
-        if (adminBtn) {
-            adminBtn.addEventListener('click', async () => {
+        if (grantBtn) {
+            grantBtn.addEventListener('click', async () => {
                 const targetEmail = targetInput.value.trim();
                 if(!targetEmail) {
                     msgBox.style.color = 'var(--danger)';
                     msgBox.textContent = 'Enter an email first.';
                     return;
                 }
-                
-                adminBtn.disabled = true; 
-                adminBtn.textContent = 'Granting...';
-                
+                grantBtn.disabled = true; grantBtn.textContent = 'Granting...';
                 try {
-                    // Call the secure Supabase function
                     const { error } = await sb.rpc('admin_grant_vip', { target_email: targetEmail });
                     if(error) throw error;
                     msgBox.style.color = 'var(--cyan)';
@@ -713,9 +767,30 @@ async function renderProfile() {
                     msgBox.style.color = 'var(--danger)';
                     msgBox.textContent = e.message;
                 }
-                
-                adminBtn.disabled = false; 
-                adminBtn.textContent = 'Grant VIP Status';
+                grantBtn.disabled = false; grantBtn.textContent = 'Grant VIP Status';
+            });
+        }
+
+        if (demoteBtn) {
+            demoteBtn.addEventListener('click', async () => {
+                const targetEmail = targetInput.value.trim();
+                if(!targetEmail) {
+                    msgBox.style.color = 'var(--danger)';
+                    msgBox.textContent = 'Enter an email first.';
+                    return;
+                }
+                demoteBtn.disabled = true; demoteBtn.textContent = 'Demoting...';
+                try {
+                    const { error } = await sb.rpc('admin_demote_vip', { target_email: targetEmail });
+                    if(error) throw error;
+                    msgBox.style.color = 'var(--cyan)';
+                    msgBox.textContent = 'Success! User has been demoted to free.';
+                    targetInput.value = '';
+                } catch(e) {
+                    msgBox.style.color = 'var(--danger)';
+                    msgBox.textContent = e.message;
+                }
+                demoteBtn.disabled = false; demoteBtn.textContent = 'Demote to Free';
             });
         }
     }
@@ -737,25 +812,19 @@ async function renderSearch() {
   $('#search-btn', wrap).addEventListener('click', async () => {
      const query = $('#search-input', wrap).value.trim();
      if (!query) return;
-     
      const resultsDiv = $('#search-results', wrap);
      resultsDiv.innerHTML = '<div class="hint">Searching database...</div>';
-     
      try {
         const { data, error } = await sb.rpc('search_card_owners', { p_card_query: query });
         if (error) throw error;
-        
         if (!data || data.length === 0) {
             resultsDiv.innerHTML = '<div class="hint">No public pulls found for this search.</div>';
             return;
         }
-        
         resultsDiv.innerHTML = '';
         data.forEach(item => {
            const card = el('div', 'refer-box'); 
-           card.style.display = 'flex';
-           card.style.alignItems = 'center';
-           card.style.cursor = 'pointer';
+           card.style.display = 'flex'; card.style.alignItems = 'center'; card.style.cursor = 'pointer';
            card.innerHTML = `
               <img src="${item.card_image || ''}" style="width:44px; height:62px; object-fit:cover; border-radius:4px; margin-right:12px;" />
               <div style="flex:1;">
@@ -838,9 +907,7 @@ async function renderUserCollection(targetUserId, username) {
                  }
                  followBtn.textContent = isFollowing ? 'Unfollow' : 'Follow';
                  followBtn.className = isFollowing ? 'btn btn-secondary' : 'btn btn-primary';
-             } catch(e) {
-                 toast('Action failed');
-             }
+             } catch(e) { toast('Action failed'); }
              followBtn.disabled = false;
          });
      }
@@ -895,7 +962,7 @@ async function renderHome(){
     const claimedToday = profile.last_daily_grant === new Date().toISOString().slice(0,10);
     setsWrap.appendChild(renderPremiumBanner(claimedToday));
   }
-  setsWrap.appendChild(el('div','section-title','Choose a booster'));
+  setsWrap.appendChild(el('div','section-title','Choose a booster (Oldest → Newest)'));
   const gridHolder = el('div'); gridHolder.innerHTML = `<div class="set-grid" id="set-grid"></div>`;
   setsWrap.appendChild(gridHolder.firstChild);
   
@@ -912,7 +979,7 @@ async function renderHome(){
     grid.innerHTML = '';
     sets.forEach(s=>{
       const card = el('div','set-card');
-      card.innerHTML = `<img src="" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${s.total} cards</div>`;
+      card.innerHTML = `<img src="" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${s.packCost} cr</div>`;
       card.addEventListener('click', ()=> render('set', { set: s }));
       grid.appendChild(card);
       ImgCache.get(s.images.symbol).then(src => card.querySelector('img').src = src);
@@ -928,6 +995,7 @@ async function renderHome(){
 async function renderSetDetail(setMeta){
   setDetailCardsCache = null; setDetailCardsCacheSetId = null;
   const wrap = el('div');
+  const dynamicCost = setMeta.packCost || 150;
   
   wrap.innerHTML = `
     <div class="pack-hero">
@@ -945,7 +1013,7 @@ async function renderSetDetail(setMeta){
       </div>
 
       <div class="pack-count">10 cards per pack · ${setMeta.total} cards in ${setMeta.name}</div>
-      <button class="btn btn-primary" id="open-pack-btn" style="width:100%;">${isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${CONFIG.ECONOMY.PACK_COST} credits`}</button>
+      <button class="btn btn-primary" id="open-pack-btn" style="width:100%;">${isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${dynamicCost} credits`}</button>
       <div class="odds-box">
         <div class="row"><span>Structure</span><b>4 common · 3 uncommon · 1 reverse holo · 2 hit slots</b></div>
         <div class="row"><span>Hit-slot odds</span><b>modeled on SV-era community data</b></div>
@@ -954,7 +1022,7 @@ async function renderSetDetail(setMeta){
     </div>
   `;
   app.appendChild(wrap);
-  $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta));
+  $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta, dynamicCost));
   
   ImgCache.get(setMeta.images.logo).then(src => {
     $('#hero-logo').src = src; 
@@ -970,9 +1038,7 @@ async function renderSetDetail(setMeta){
     const idLower = setMeta.id.toLowerCase();
     const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
     
-    let isFallbackList = false;
     let rawUrls = [];
-    
     try {
       const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
       const ghRes = await fetch(githubApiUrl);
@@ -985,7 +1051,6 @@ async function renderSetDetail(setMeta){
     } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
 
     if (rawUrls.length === 0) {
-      isFallbackList = true;
       rawUrls = [
         `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
         `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
@@ -999,7 +1064,6 @@ async function renderSetDetail(setMeta){
         const resolved = await ImgCache.get(url);
         if(resolved) {
           validUrls.push(resolved);
-          if (isFallbackList) break;
         }
       } catch(err) { continue; }
     }
@@ -1034,10 +1098,7 @@ async function renderSetDetail(setMeta){
         
         if (uniqueValidUrls.length > 1) {
             const hint = el('div', 'hint');
-            hint.style.marginTop = '4px';
-            hint.style.marginBottom = '12px';
-            hint.style.fontWeight = '600';
-            hint.style.color = 'var(--cyan)';
+            hint.style.marginTop = '4px'; hint.style.marginBottom = '12px'; hint.style.fontWeight = '600'; hint.style.color = 'var(--cyan)';
             hint.textContent = '← Swipe & tap to choose pack art →';
             $('#pack-gallery-wrap', wrap).appendChild(hint);
         }
@@ -1047,42 +1108,39 @@ async function renderSetDetail(setMeta){
     const feature = hits.length ? hits[Math.floor(Math.random()*hits.length)] : cards[0];
     if(feature?.images?.large){ ImgCache.get(feature.images.large); }
 
-  }catch(e){ 
-  }
+  }catch(e){ }
 }
 
 let setDetailCardsCache = null, setDetailCardsCacheSetId = null;
 
 function isVip(){ 
-  // Check database profile flag instead of hardcoded emails
   if (profile?.is_admin) return true;
   return !guestMode && profile?.premium_tier === 'vip'; 
 }
 
-async function beginOpen(setMeta){
+async function beginOpen(setMeta, packCost){
   if(!session && !guestMode) {
       openAuthModal(setMeta);
       return;
   }
 
-  if(!isVip() && currentCredits() < CONFIG.ECONOMY.PACK_COST){ return openGetCreditsModal(true); }
-  const btn = $('#open-pack-btn'); btn.disabled = true; btn.textContent = 'Loading real cards…';
+  if(!isVip() && currentCredits() < packCost){ return openGetCreditsModal(true); }
+  const btn = $('#open-pack-btn'); btn.disabled = true; btn.textContent = 'Loading cards…';
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
 
     if(isVip()){
     } else if(guestMode){
-      const gs = getGuestState(); gs.credits -= CONFIG.ECONOMY.PACK_COST; gs.usedFreePack = true;
+      const gs = getGuestState(); gs.credits -= packCost; gs.usedFreePack = true;
       setGuestState(gs); $('#credit-count').textContent = gs.credits;
     } else {
-      const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: CONFIG.ECONOMY.PACK_COST });
+      const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: packCost });
       if(error) throw error;
       profile.credits = newBalance; $('#credit-count').textContent = newBalance;
     }
 
     const pack = generatePack(cards);
-    
-    btn.textContent = 'Downloading pack art...';
+    btn.textContent = 'Caching pack assets...';
     
     const urlsToPrefetch = [setMeta.images.logo];
     if(setMeta.resolvedPackArt) urlsToPrefetch.push(setMeta.resolvedPackArt);
@@ -1101,13 +1159,13 @@ async function beginOpen(setMeta){
     await Promise.all(urlsToPrefetch.map(url => ImgCache.get(url).catch(()=>null)));
     
     if(!guestMode){
-      await sb.from('openings').insert({ user_id: session.user.id, set_id: setMeta.id, set_name: setMeta.name, cards: pack.cards.map(p=>({id:p.card.id,name:p.card.name,rarity:p.card.rarity,image:p.card.images.small})), cost: CONFIG.ECONOMY.PACK_COST });
+      await sb.from('openings').insert({ user_id: session.user.id, set_id: setMeta.id, set_name: setMeta.name, cards: pack.cards.map(p=>({id:p.card.id,name:p.card.name,rarity:p.card.rarity,image:p.card.images.small})), cost: packCost });
     }
     persistToCollection(pack.cards);
     openRevealScreen(setMeta, pack, bgUrl);
   }catch(e){
     toast(e.message==='insufficient_credits' ? 'Not enough credits' : 'Something went wrong — try again');
-  }finally{ btn.disabled=false; btn.textContent = isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${CONFIG.ECONOMY.PACK_COST} credits`; }
+  }finally{ btn.disabled=false; btn.textContent = isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${packCost} credits`; }
 }
 
 function persistToCollection(packCards){
@@ -1165,75 +1223,72 @@ function openRevealScreen(setMeta, pack, bgUrl){
   }, 620);
 
   function boot(){
-  const dotsWrap = $('#dots', screen);
-  pack.cards.forEach(()=> dotsWrap.appendChild(el('span')));
-  $('#close-reveal', screen).addEventListener('click', ()=>{ screen.remove(); flashLayer.remove(); showSummary(setMeta, pack); });
+    const dotsWrap = $('#dots', screen);
+    pack.cards.forEach(()=> dotsWrap.appendChild(el('span')));
+    $('#close-reveal', screen).addEventListener('click', ()=>{ screen.remove(); flashLayer.remove(); showSummary(setMeta, pack); });
 
-  function showCard(i){
-    const p = pack.cards[i]; const tier = classify(p.card.rarity);
-    bestTier = Math.max(bestTier, tier.id);
-    $('#prog', screen).textContent = `Card ${i+1} / ${pack.cards.length}`;
-    $('#front-img', screen).src = ImgCache.sync(p.card.images.large || p.card.images.small);
-    
-    // HIDE TEXT UNTIL FLIPPED
-    $('#card-name', screen).innerHTML = '&nbsp;';
-    $('#card-sub', screen).innerHTML = '&nbsp;';
-    
-    const badge = $('#tier-badge', screen); badge.textContent = tier.label; badge.style.background = tier.color;
-    if(!collection[p.card.id]){
-      const nb = el('div','new-badge','NEW'); $('.face.front', screen).appendChild(nb);
-    } else { $('.face.front .new-badge', screen)?.remove(); }
-    $('#buy-slot', screen).innerHTML = '';
-    const flip = $('#flipcard', screen); flip.classList.remove('flipped','rare-fx');
-    if(tier.id >= 3) flip.classList.add('rare-fx');
-    if(!guestMode && profile?.is_premium) flip.classList.add(isVip() ? 'vip-fx' : 'premium-fx');
-    $('#tap-hint', screen).textContent = 'Tap the card to flip it';
-    flip.dataset.done = '0';
-  }
-  function markDot(i, tier){
-    const dot = dotsWrap.children[i]; dot.classList.add('done'); if(tier>=4) dot.classList.add('hit');
-  }
-  function foilTilt(e){
-    const flip = $('#flipcard', screen); if(!flip.classList.contains('rare-fx')) return;
-    const rect = flip.getBoundingClientRect();
-    const cx = (e.touches?e.touches[0].clientX:e.clientX) - rect.left, cy = (e.touches?e.touches[0].clientY:e.clientY) - rect.top;
-    const ang = Math.atan2(cy-rect.height/2, cx-rect.width/2) * 180/Math.PI;
-    $('#foil', screen).style.setProperty('--ang', ang+'deg');
-  }
-  screen.addEventListener('pointermove', foilTilt);
-  showCard(0);
-
-  $('#flipcard', screen).addEventListener('click', function(){
-    if(this.dataset.done==='1'){
-      idx++;
-      if(idx >= pack.cards.length){ screen.remove(); flashLayer.remove(); showSummary(setMeta, pack); return; }
-      this.classList.remove('flipped'); this.dataset.done='0';
-      setTimeout(()=>showCard(idx), 180);
-      return;
-    }
-    this.classList.add('flipped'); this.dataset.done='1';
-    const cardObj = pack.cards[idx].card;
-    const tier = classify(cardObj.rarity);
-    markDot(idx, tier.id);
-    SFX.flip();
-    setTimeout(()=>{
-      // REVEAL TEXT WHEN FLIPPED
-      $('#card-name', screen).textContent = cardObj.name;
-      $('#card-sub', screen).textContent = `${cardObj.rarity || 'Common'}${pack.cards[idx].foil ? ' · Foil' : ''} — ${cardObj.set?.name || setMeta.name}`;
+    function showCard(i){
+      const p = pack.cards[i]; const tier = classify(p.card.rarity);
+      bestTier = Math.max(bestTier, tier.id);
+      $('#prog', screen).textContent = `Card ${i+1} / ${pack.cards.length}`;
+      $('#front-img', screen).src = ImgCache.sync(p.card.images.large || p.card.images.small);
       
-      $('#buy-slot', screen).innerHTML = buyLink(cardObj);
-      if(tier.id>=7){
-        SFX.chase(); vibrate([30,60,30,60,80]); burstConfetti(90);
-        screen.classList.add('shake'); setTimeout(()=>screen.classList.remove('shake'), 500);
-        flashLayer.classList.add('go'); setTimeout(()=>flashLayer.classList.remove('go'), 500);
+      $('#card-name', screen).innerHTML = '&nbsp;';
+      $('#card-sub', screen).innerHTML = '&nbsp;';
+      
+      const badge = $('#tier-badge', screen); badge.textContent = tier.label; badge.style.background = tier.color;
+      if(!collection[p.card.id]){
+        const nb = el('div','new-badge','NEW'); $('.face.front', screen).appendChild(nb);
+      } else { $('.face.front .new-badge', screen)?.remove(); }
+      $('#buy-slot', screen).innerHTML = '';
+      const flip = $('#flipcard', screen); flip.classList.remove('flipped','rare-fx');
+      if(tier.id >= 3) flip.classList.add('rare-fx');
+      if(!guestMode && profile?.is_premium) flip.classList.add(isVip() ? 'vip-fx' : 'premium-fx');
+      $('#tap-hint', screen).textContent = 'Tap the card to flip it';
+      flip.dataset.done = '0';
+    }
+    function markDot(i, tier){
+      const dot = dotsWrap.children[i]; dot.classList.add('done'); if(tier>=4) dot.classList.add('hit');
+    }
+    function foilTilt(e){
+      const flip = $('#flipcard', screen); if(!flip.classList.contains('rare-fx')) return;
+      const rect = flip.getBoundingClientRect();
+      const cx = (e.touches?e.touches[0].clientX:e.clientX) - rect.left, cy = (e.touches?e.touches[0].clientY:e.clientY) - rect.top;
+      const ang = Math.atan2(cy-rect.height/2, cx-rect.width/2) * 180/Math.PI;
+      $('#foil', screen).style.setProperty('--ang', ang+'deg');
+    }
+    screen.addEventListener('pointermove', foilTilt);
+    showCard(0);
+
+    $('#flipcard', screen).addEventListener('click', function(){
+      if(this.dataset.done==='1'){
+        idx++;
+        if(idx >= pack.cards.length){ screen.remove(); flashLayer.remove(); showSummary(setMeta, pack); return; }
+        this.classList.remove('flipped'); this.dataset.done='0';
+        setTimeout(()=>showCard(idx), 180);
+        return;
       }
-      else if(tier.id>=4){ SFX.hit(); vibrate([20,40,20]); burstConfetti(45); }
-      else if(tier.id>=3){ SFX.holo(); vibrate(15); burstConfetti(18); }
-      else if(tier.id===1){ SFX.uncommon(); }
-      else SFX.common();
-    }, 250);
-    $('#tap-hint', screen).textContent = idx < pack.cards.length-1 ? 'Tap to reveal the next card' : 'Tap to see your full pack';
-  });
+      this.classList.add('flipped'); this.dataset.done='1';
+      const cardObj = pack.cards[idx].card;
+      const tier = classify(cardObj.rarity);
+      markDot(idx, tier.id);
+      SFX.flip();
+      setTimeout(()=>{
+        $('#card-name', screen).textContent = cardObj.name;
+        $('#card-sub', screen).textContent = `${cardObj.rarity || 'Common'}${pack.cards[idx].foil ? ' · Foil' : ''} — ${cardObj.set?.name || setMeta.name}`;
+        $('#buy-slot', screen).innerHTML = buyLink(cardObj);
+        if(tier.id>=7){
+          SFX.chase(); vibrate([30,60,30,60,80]); burstConfetti(90);
+          screen.classList.add('shake'); setTimeout(()=>screen.classList.remove('shake'), 500);
+          flashLayer.classList.add('go'); setTimeout(()=>flashLayer.classList.remove('go'), 500);
+        }
+        else if(tier.id>=4){ SFX.hit(); vibrate([20,40,20]); burstConfetti(45); }
+        else if(tier.id>=3){ SFX.holo(); vibrate(15); burstConfetti(18); }
+        else if(tier.id===1){ SFX.uncommon(); }
+        else SFX.common();
+      }, 250);
+      $('#tap-hint', screen).textContent = idx < pack.cards.length-1 ? 'Tap to reveal the next card' : 'Tap to see your full pack';
+    });
   }
 }
 
@@ -1287,7 +1342,6 @@ function openGetCreditsModal(lowBalance=false){
     openAuthModal();
     return;
   }
-
   const overlay = el('div','overlay');
   const sheet = el('div','sheet');
 
