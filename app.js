@@ -631,7 +631,9 @@ function isAdminUser(){
 
 function currentCredits(){ 
   if (isAdminUser()) return '∞';
-  return guestMode ? (Number(getGuestState().credits) || CONFIG.ECONOMY.GUEST_CREDITS) : (profile?.credits ?? 0); 
+  if (guestMode) return Number(getGuestState().credits) || CONFIG.ECONOMY.GUEST_CREDITS;
+  if (!profile || profile.credits == null) return CONFIG.ECONOMY.STARTING_CREDITS;
+  return profile.credits; 
 }
 
 async function initAuth(){
@@ -663,6 +665,9 @@ async function loadProfile(){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if(!error) {
     profile = data;
+    const creditCountEl = $('#credit-count');
+    if (creditCountEl) creditCountEl.textContent = currentCredits();
+
     if (profile.premium_tier === 'vip') {
       const today = new Date().toISOString().slice(0, 10);
       if (profile.last_daily_grant !== today) {
@@ -670,7 +675,6 @@ async function loadProfile(){
           if (!claimErr && newCreds !== null) {
             profile.credits = newCreds;
             profile.last_daily_grant = today;
-            const creditCountEl = $('#credit-count');
             if (creditCountEl && !isAdminUser()) creditCountEl.textContent = newCreds;
           }
         }).catch(()=>{});
@@ -963,7 +967,7 @@ function renderAccountArea(user, userProfile) {
         <span class="account-badge ${badge.cssClass}">${badge.label}</span>
       </div>
       <div class="account-details">
-        <p><strong>Credits:</strong> ${userProfile?.is_admin ? '∞ (Admin Unlimited)' : (userProfile?.credits?.toLocaleString() || 0)}</p>
+        <p><strong>Credits:</strong> ${userProfile?.is_admin ? '∞ (Admin Unlimited)' : (userProfile?.credits?.toLocaleString() || CONFIG.ECONOMY.STARTING_CREDITS)}</p>
         <p><strong>Status:</strong> ${userProfile?.is_premium ? 'Active Subscription' : 'Standard'}</p>
       </div>
     </div>
@@ -1004,10 +1008,6 @@ async function renderProfile() {
          <button class="btn btn-vip" id="admin-update-membership-btn" style="width:100%;">Update User Membership</button>
          <div id="admin-msg" class="hint" style="margin-top:12px; text-align:center; font-weight:bold; min-height:16px;"></div>
       </div>
-
-      <div id="admin-debug-hint" class="hint" style="margin-top:20px; text-align:center; display:none; padding:12px; border:1px dashed var(--edge); border-radius:12px;">
-          💡 <strong>Admin Notice:</strong> If you don't see the admin controls above, ensure your account row in the Supabase database has <code style="color:var(--cyan);">is_admin = true</code>. Run: <code style="color:var(--cyan);">UPDATE profiles SET is_admin = true WHERE id = '${session?.user?.id || 'YOUR_USER_ID'}';</code> in your Supabase SQL editor.
-      </div>
   `;
   app.appendChild(wrap);
 
@@ -1032,11 +1032,9 @@ async function renderProfile() {
     renderAccountArea(session?.user, profile);
 
     const adminPanel = $('#admin-panel', wrap);
-    const debugHint = $('#admin-debug-hint', wrap);
 
     if (session && profile?.is_admin) {
         if (adminPanel) adminPanel.style.display = 'block';
-        if (debugHint) debugHint.style.display = 'none';
 
         const updateBtn = $('#admin-update-membership-btn', wrap);
         const userSelect = $('#admin-target-user-select', wrap);
@@ -1084,7 +1082,6 @@ async function renderProfile() {
         }
     } else {
         if (adminPanel) adminPanel.style.display = 'none';
-        if (debugHint && session) debugHint.style.display = 'block';
     }
   }, 0);
 }
