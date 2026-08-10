@@ -651,6 +651,15 @@ function getGuestState(){
     s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false };
     store.set('guest_state', s);
   }
+  // Sanity clamp — guards against corrupted/edited localStorage values
+  // breaking the UI (e.g. negative counts, Infinity). This cannot stop
+  // someone from editing their own browser storage — that's inherent to
+  // any client-only guest mode with no server-side account.
+  const MAX_GUEST_CREDITS = 5_000_000;
+  if(s.credits > MAX_GUEST_CREDITS || !Number.isFinite(s.credits)) {
+    s.credits = MAX_GUEST_CREDITS;
+    store.set('guest_state', s);
+  }
   return s;
 }
 function setGuestState(s){ store.set('guest_state', s); }
@@ -1878,63 +1887,21 @@ function renderCollection(){
 }
 
 /* ============================================================
-   Simplified Direct Trading Hub (Virtual Items Only)
+   Trading Hub — coming soon
+   Real trading requires collections to live server-side so there's
+   an actual recipient to transfer to. Until that exists, this screen
+   must not claim to send anything or remove cards from the sender.
    ============================================================ */
 function renderTrade(){
-  const map = getCollectionsMap();
-  const activeName = getActiveCollectionName();
-  const coll = map[activeName] || {};
-  const cardKeys = Object.keys(coll);
-
   const wrap = el('div');
   wrap.innerHTML = `
     <div class="section-title">Direct Card Trade Hub</div>
     <div class="account-card" style="margin-bottom:16px;">
-      <h3 style="margin-top:0; color:var(--cyan);">🤝 Send a Card</h3>
-      <p class="hint">Select a card from your active collection and send it directly to another collector by their username or email. All trades involve virtual items and simulation currency only.</p>
-    </div>
-
-    <div class="account-card" style="display:flex; flex-direction:column; gap:12px;">
-      <h4 style="margin-top:0;">Select Card to Send</h4>
-      ${!cardKeys.length ? '<div class="hint">Your active collection is empty. Open some packs first!</div>' : `
-        <select id="trade-card-select">
-          ${cardKeys.map(id => `<option value="${id}">${coll[id].name} (${coll[id].rarity || 'Common'}) [×${coll[id].count}]</option>`).join('')}
-        </select>
-        <input type="text" id="trade-recipient-input" placeholder="Recipient username or email..." />
-        <button class="btn btn-primary" id="send-card-trade-btn" style="width:100%; margin-top:4px;">Send Card Gift</button>
-      `}
+      <h3 style="margin-top:0; color:var(--cyan);">🤝 Trading — Coming Soon</h3>
+      <p class="hint">Trading directly with other collectors isn't live yet. We're building it out so trades are real and secure. Check back soon!</p>
     </div>
   `;
   app.appendChild(wrap);
-
-  if(cardKeys.length) {
-    $('#send-card-trade-btn', wrap).addEventListener('click', () => {
-      const selectedId = $('#trade-card-select', wrap).value;
-      const recipient = $('#trade-recipient-input', wrap).value.trim();
-      
-      if(!recipient) {
-        toast('Please enter a recipient username or email.');
-        return;
-      }
-      
-      const cardObj = coll[selectedId];
-      if(!cardObj || cardObj.count <= 0) {
-        toast('Selected card is no longer available.');
-        return;
-      }
-
-      cardObj.count--;
-      if(cardObj.count <= 0) {
-        delete coll[selectedId];
-      }
-      map[activeName] = coll;
-      store.set('user_collections', map);
-      
-      toast(`Successfully sent ${cardObj.name} to ${recipient}!`);
-      $('#trade-recipient-input', wrap).value = '';
-      render('trade');
-    });
-  }
 }
 
 const SHARE_BONUS = 5000;
