@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'chasecards-universal-images-v13';
+        const CACHE_NAME = 'chasecards-universal-images-v14';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -401,7 +401,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v13');
+        const cache = await caches.open('chasecards-universal-images-v14');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -524,13 +524,27 @@ async function getSets(){
       let cost = calculatePackCost(idx, totalCount);
       if (s.releaseDate) {
         const year = parseInt(s.releaseDate.split(/[-/]/)[0], 10);
-        if (!isNaN(year) && year < 2010) {
-          cost *= 2; // 100% more expensive (doubled) for pre-2010 packs
+        if (!isNaN(year)) {
+          let multiplier = 10; // 2015 to current default (10x)
+          if (year < 2000) {
+            multiplier = 50;
+          } else if (year >= 2000 && year <= 2004) {
+            multiplier = 30;
+          } else if (year >= 2005 && year <= 2007) {
+            multiplier = 25;
+          } else if (year >= 2008 && year <= 2010) {
+            multiplier = 20;
+          } else if (year >= 2011 && year <= 2014) {
+            multiplier = 15;
+          } else {
+            multiplier = 10;
+          }
+          cost *= multiplier;
         }
       }
       return {
         ...s,
-        packCost: cost
+        packCost: Math.round(cost / 5) * 5
       };
     });
 
