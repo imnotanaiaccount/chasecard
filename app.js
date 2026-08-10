@@ -382,7 +382,6 @@ async function getSets(){
   try{
     const raw = await pokeFetch('/sets?orderBy=-releaseDate');
     let setsData = raw.data || [];
-    // Sort oldest to newest
     setsData.sort((a,b)=> new Date(a.releaseDate) - new Date(b.releaseDate));
     
     let data = setsData.map(s => ({
@@ -494,7 +493,7 @@ function generatePack(cards){
 /* ============================================================
    Auth & profile
    ============================================================ */
-let session = null, profile = null, guestMode = false;
+let session = null, profile = null, guestMode = true;
 
 function getGuestState(){ 
   let s = store.get('guest_state', null);
@@ -533,9 +532,15 @@ async function initAuth(){
   sb.auth.onAuthStateChange((_evt, s)=>{ 
     session = s; 
     if(s){ guestMode = false; onLoggedIn(); } 
-    else { profile = null; render('home'); } 
+    else { profile = null; guestMode = true; render('home'); } 
   });
-  if(session) await onLoggedIn(); else { guestMode = false; render('home'); }
+  if(session) {
+    guestMode = false;
+    await onLoggedIn();
+  } else {
+    guestMode = true;
+    render('home');
+  }
 }
 async function onLoggedIn(){
   await loadProfile();
@@ -787,7 +792,7 @@ function renderTopbar(){
   if(session) {
       bar.querySelector('#logout-btn').addEventListener('click', async ()=> {
           await sb.auth.signOut();
-          guestMode = false;
+          guestMode = true;
           render('home');
       });
   } else {
