@@ -11,7 +11,7 @@ const CONFIG = {
   
   ECONOMY: {
     STARTING_CREDITS: 500,
-    GUEST_CREDITS: 450*5,
+    GUEST_CREDITS: 2250, // Fair starting credit amount for guest sessions (450 * 5)
     REFERRAL_BONUS: 250,
     PREMIUM_TIERS: [
       { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 /* ============================================================
-   Dynamic Styles Injection (Includes Loading Bar & Adjustments)
+   Dynamic Styles Injection (Includes UI, Inputs & Loading Bar)
    ============================================================ */
 const customStyles = document.createElement('style');
 customStyles.innerHTML = `
@@ -75,6 +75,24 @@ customStyles.innerHTML = `
 }
 .search-bar-wrap input {
   flex: 1;
+}
+
+/* Polished Auth Inputs Fix */
+.auth-form input, .sheet input[type="email"], .sheet input[type="password"], .sheet input[type="text"] {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-body);
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  font-size: 1rem;
+}
+.auth-form input:focus, .sheet input:focus {
+  border-color: var(--cyan);
+  outline: none;
 }
 
 /* Global Network Loading Bar */
@@ -137,7 +155,7 @@ const sb = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const $ = (sel, root=document) => root.querySelector(sel);
 const el = (tag, cls, html) => { const e=document.createElement(tag); if(cls) e.className=cls; if(html!=null) e.innerHTML=html; return e; };
 function toast(msg, ms=2400){
-  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  const t = $('#toast'); if(!t) return; t.textContent = msg; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), ms);
 }
 function vibrate(pattern){ if(navigator.vibrate) try{navigator.vibrate(pattern);}catch(e){} }
@@ -151,19 +169,100 @@ function buyLink(card){
   return `<a class="buy-card-btn" href="https://www.tcgplayer.com/search/pokemon/product?q=${q}" target="_blank" rel="noopener sponsored">🛒 Buy this card</a>`;
 }
 
+/* ============================================================
+   Card Market Valuation & 70% Sell-Back System (Virtual Currency Only)
+   ============================================================ */
+const RARITY_ESTIMATED_VALUES = {
+  0: 0.15,   // Common
+  1: 0.35,   // Uncommon
+  2: 1.50,   // Rare
+  3: 4.00,   // Holo Rare
+  4: 12.50,  // Double Rare (ex/gx/v)
+  5: 25.00,  // Ultra Rare
+  6: 35.00,  // Illustration Rare
+  7: 75.00,  // Special Illustration Rare
+  8: 150.00  // Hyper / Secret Rare
+};
+
+function getCardMarketValue(card) {
+  const tierId = classify(card?.rarity).id;
+  return RARITY_ESTIMATED_VALUES[tierId] || 0.50;
+}
+
+function getCardSellValue(card) {
+  const marketValUSD = getCardMarketValue(card);
+  // 70% of market value converted to virtual credits (e.g. $1.00 USD = 100 virtual credits)
+  const sellValCredits = Math.round(marketValUSD * 0.70 * 100);
+  return Math.max(10, sellValCredits); // Minimum 10 credits
+}
+
 function showCardFullscreen(imgSrc, cardObj){
   const overlay = el('div','overlay');
   overlay.style.alignItems = 'center';
   overlay.style.justifyContent = 'center';
   overlay.style.zIndex = '300';
+  
+  const sellCredits = cardObj ? getCardSellValue(cardObj) : 0;
+  
   overlay.innerHTML = `
       <div style="position:relative; width:90%; max-width:400px; perspective:1200px; display:flex; flex-direction:column; align-items:center;">
-          <img src="${imgSrc}" style="width:100%; border-radius:18px; box-shadow:0 30px 60px rgba(0,0,0,0.8); animation: zoomIn 0.3s cubic-bezier(0.2,0.8,0.2,1); object-fit:contain; max-height:75vh;"/>
-          ${cardObj ? `<div style="text-align:center; margin-top:20px; animation: slideup 0.3s ease;">${buyLink(cardObj)}</div>` : ''}
+          <img src="${imgSrc}" style="width:100%; border-radius:18px; box-shadow:0 30px 60px rgba(0,0,0,0.8); animation: zoomIn 0.3s cubic-bezier(0.2,0.8,0.2,1); object-fit:contain; max-height:70vh;"/>
+          ${cardObj ? `
+            <div style="text-align:center; margin-top:16px; display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; animation: slideup 0.3s ease;">
+                ${buyLink(cardObj)}
+                <button class="btn btn-secondary" id="sell-card-btn" style="background:var(--danger); border-color:var(--danger); color:#fff; padding:10px 16px; font-size:13px;">Sell for ${sellCredits} Credits (70%)</button>
+            </div>
+            <div class="hint" style="font-size:10px; margin-top:6px; color:var(--dim); text-align:center;">Virtual currency only. No real-world cash value.</div>
+          ` : ''}
       </div>
   `;
   document.body.appendChild(overlay);
+  
+  if(cardObj) {
+    overlay.querySelector('#sell-card-btn').addEventListener('click', () => {
+      sellCardFromCollection(cardObj, sellCredits);
+      overlay.remove();
+    });
+  }
+
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+}
+
+function sellCardFromCollection(cardObj, creditsEarned) {
+  const map = getCollectionsMap();
+  const activeName = getActiveCollectionName();
+  const coll = map[activeName] || {};
+  
+  if(!coll[cardObj.id] || coll[cardObj.id].count <= 0) {
+    toast('Card not found in active binder');
+    return;
+  }
+  
+  coll[cardObj.id].count--;
+  if(coll[cardObj.id].count <= 0) {
+    delete coll[cardObj.id];
+  }
+  
+  map[activeName] = coll;
+  store.set('user_collections', map);
+  store.set('collection', coll);
+  
+  // Credit user virtual currency
+  if(guestMode) {
+    const gs = getGuestState();
+    gs.credits = (gs.credits || 0) + creditsEarned;
+    setGuestState(gs);
+    $('#credit-count').textContent = gs.credits;
+  } else if(profile) {
+    profile.credits = (profile.credits || 0) + creditsEarned;
+    $('#credit-count').textContent = profile.credits;
+    // Update server side if logged in
+    sb.from('profiles').update({ credits: profile.credits }).eq('id', session.user.id).then();
+  }
+  
+  SFX.coin();
+  toast(`Sold card for +${creditsEarned} virtual credits!`);
+  render(route.name, route.params);
 }
 
 /* ============================================================
@@ -213,11 +312,12 @@ const ImgCache = {
    ============================================================ */
 const SFX = { flip(){}, common(){}, uncommon(){}, holo(){}, hit(){}, chase(){}, coin(){}, tear(){} };
 
-const confettiCanvas = $('#confetti'); const cctx = confettiCanvas.getContext('2d');
-function resizeConfetti(){ confettiCanvas.width = innerWidth; confettiCanvas.height = innerHeight; }
+const confettiCanvas = $('#confetti'); const cctx = confettiCanvas ? confettiCanvas.getContext('2d') : null;
+function resizeConfetti(){ if(confettiCanvas) { confettiCanvas.width = innerWidth; confettiCanvas.height = innerHeight; } }
 addEventListener('resize', resizeConfetti); resizeConfetti();
 let particles = [];
 function burstConfetti(count=60, colors=['#4de8e0','#e84dc0','#f0b94d','#ffffff']){
+  if(!cctx || !confettiCanvas) return;
   const cx = innerWidth/2, cy = innerHeight*0.4;
   for(let i=0;i<count;i++){
     const ang = Math.random()*Math.PI*2, speed = 3+Math.random()*7;
@@ -226,6 +326,7 @@ function burstConfetti(count=60, colors=['#4de8e0','#e84dc0','#f0b94d','#ffffff'
   if(!burstConfetti._running){ burstConfetti._running = true; requestAnimationFrame(tickConfetti); }
 }
 function tickConfetti(){
+  if(!cctx || !confettiCanvas) return;
   cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
   particles.forEach(p=>{ p.vy += 0.15; p.x += p.vx; p.y += p.vy; p.life -= 0.012; p.rot += p.vr;
     cctx.save(); cctx.globalAlpha = Math.max(p.life,0); cctx.translate(p.x,p.y); cctx.rotate(p.rot);
@@ -270,11 +371,9 @@ function calculatePackCost(index, totalSets) {
   if (totalSets <= 1) return 150;
   const minCost = 50;
   const maxCost = 300;
-  // index 0 is oldest, totalSets - 1 is newest
-  // Oldest sets = most expensive (300), newest sets = cheapest (50)
   const ratio = index / (totalSets - 1);
   const cost = maxCost - ratio * (maxCost - minCost);
-  return Math.round(cost / 5) * 5; // rounded to nearest 5 credits
+  return Math.round(cost / 5) * 5; 
 }
 
 async function getSets(){
@@ -287,7 +386,7 @@ async function getSets(){
     const raw = await tcgFetch('/sets');
     let data = raw
       .filter(s => s.cardCount?.total > 0)
-      .sort((a,b)=> (a.id > b.id ? 1 : -1)) // Sorted oldest to newest
+      .sort((a,b)=> (a.id > b.id ? 1 : -1))
       .map(s => ({
         id: s.id, name: s.name, series: s.serie?.name || '',
         total: s.cardCount?.total || s.cardCount?.official || 0,
@@ -412,18 +511,28 @@ function generatePack(cards){
    ============================================================ */
 let session = null, profile = null, guestMode = false;
 
-function getGuestState(){ return store.get('guest_state', { credits: null, usedFreePack: false }); }
+function getGuestState(){ 
+  let s = store.get('guest_state', null);
+  if(!s || s.credits === null || s.credits === undefined) {
+    s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false };
+    store.set('guest_state', s);
+  }
+  return s;
+}
 function setGuestState(s){ store.set('guest_state', s); }
 
 function startGuestSession(redirect=true){
   guestMode = true;
   let s = getGuestState();
-  if(s.credits === null){ s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false }; setGuestState(s); }
+  if(s.credits === null || s.credits === undefined){ 
+    s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false }; 
+    setGuestState(s); 
+  }
   if(redirect) render('home');
   else render(route.name, route.params); 
 }
 function exitGuestMode(){ guestMode = false; openAuthModal(); }
-function currentCredits(){ return guestMode ? (getGuestState().credits ?? 0) : (profile?.credits ?? 0); }
+function currentCredits(){ return guestMode ? (getGuestState().credits ?? CONFIG.ECONOMY.GUEST_CREDITS) : (profile?.credits ?? 0); }
 
 async function initAuth(){
   const { data } = await sb.auth.getSession();
@@ -455,6 +564,48 @@ async function loadProfile(){
 })();
 
 /* ============================================================
+   Multi-Collection / Binders & Trading Helpers
+   ============================================================ */
+function getCollectionsMap() {
+  let map = store.get('user_collections', null);
+  if (!map || typeof map !== 'object') {
+    const legacy = store.get('collection', null);
+    map = { 'Main Binder': legacy || {} };
+    store.set('user_collections', map);
+  }
+  return map;
+}
+
+function getActiveCollectionName() {
+  const map = getCollectionsMap();
+  let active = store.get('active_collection', null);
+  if (!active || !map[active]) {
+    active = Object.keys(map)[0] || 'Main Binder';
+    store.set('active_collection', active);
+  }
+  return active;
+}
+
+function getActiveCollectionCards() {
+  const map = getCollectionsMap();
+  const active = getActiveCollectionName();
+  return map[active] || {};
+}
+
+function persistToActiveCollection(packCards){
+  const map = getCollectionsMap();
+  const active = getActiveCollectionName();
+  map[active] = map[active] || {};
+  packCards.forEach(p=>{
+    const c = p.card;
+    map[active][c.id] = map[active][c.id] || { name:c.name, image:c.images.small, rarity:c.rarity, count:0 };
+    map[active][c.id].count++;
+  });
+  store.set('user_collections', map);
+  store.set('collection', map[active]);
+}
+
+/* ============================================================
    Views
    ============================================================ */
 const app = $('#app');
@@ -462,6 +613,7 @@ let route = { name:'home' };
 
 function render(name, params={}){
   route = { name, params };
+  if(!app) return;
   app.innerHTML = '';
   app.appendChild(renderTopbar());
   
@@ -471,6 +623,7 @@ function render(name, params={}){
   if(name==='search') renderSearch();
   if(name==='profile') renderProfile();
   if(name==='user_collection') renderUserCollection(params.userId, params.username);
+  if(name==='trade') renderTrade();
   
   app.appendChild(renderTabs());
 }
@@ -489,7 +642,7 @@ function openAuthModal(resumeSetMeta = null){
     sheet.innerHTML = `
       <div class="sheet-handle"></div>
       <h2>Welcome Back</h2>
-      <div class="sub">Choose how you'd like to log in or sign up.</div>
+      <div class="sub">Choose how you'd like to log in or sign up. New accounts receive ${CONFIG.ECONOMY.STARTING_CREDITS} starting credits!</div>
       
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
           <button class="btn btn-secondary" type="button" id="google-auth-btn" style="display:flex; align-items:center; justify-content:center; gap:8px;">
@@ -508,7 +661,7 @@ function openAuthModal(resumeSetMeta = null){
 
       <div style="height:1px; background:var(--edge); margin:20px 0;"></div>
       <button class="btn btn-secondary" type="button" id="modal-guest-btn" style="width:100%;">Continue as guest</button>
-      <div class="hint" style="margin-top:8px;text-align:center;">Guests get up to 5 free packs on this device.</div>
+      <div class="hint" style="margin-top:8px;text-align:center;">Guests get ${CONFIG.ECONOMY.GUEST_CREDITS} credits on this device.</div>
     `;
 
     const errBox = $('#auth-error-msg', sheet);
@@ -526,15 +679,9 @@ function openAuthModal(resumeSetMeta = null){
     });
 
     $('#passkey-auth-btn', sheet).addEventListener('click', async () => {
-      errBox.style.color = 'var(--text)'; errBox.textContent = 'Waiting for Passkey...';
-      try {
-          const { error } = await sb.auth.signInWithWebAuthn();
-          if (error) throw error;
-          overlay.remove();
-      } catch (err) {
-          errBox.style.color = '#ff6b6b';
-          errBox.textContent = 'Passkey login failed or canceled.';
-      }
+      errBox.style.color = 'var(--cyan)'; 
+      errBox.textContent = 'Passkeys require HTTPS domain configuration in Supabase Auth settings. Use Email or Google for immediate access.';
+      toast('Passkey authentication requires Supabase WebAuthn setup.');
     });
 
     $('#email-view-btn', sheet).addEventListener('click', renderEmailView);
@@ -649,6 +796,7 @@ function renderTabs(){
     { key:'home', label:'Packs', icon:'M4 12l8-8 8 8M6 10v10h12V10' },
     { key:'collection', label:'Collection', icon:'M4 6h16M4 12h16M4 18h16' },
     { key:'search', label:'Search', icon:'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
+    { key:'trade', label:'Trade', icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
     { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
   ];
   items.forEach(it=>{
@@ -707,11 +855,10 @@ async function renderProfile() {
       <div class="section-title">My Account</div>
       <div id="account-section"></div>
       
-      <!-- Secure Admin Panel with Grant & Demote Controls -->
       <div id="admin-panel" style="display:none; margin-top:30px; padding:18px; background:var(--panel-2); border:1px solid var(--vip-gold-dim); border-radius:14px; box-shadow: 0 4px 15px rgba(255, 233, 184, 0.1);">
          <h3 style="color:var(--vip-gold); margin-top:0; font-family:var(--font-display); font-size:18px;">🛠️ Admin Controls</h3>
-         <p class="hint" style="margin-bottom:14px;">Manage free VIP promotions or demote users by their exact account email.</p>
-         <input type="email" id="admin-target-email" placeholder="user@email.com" style="width:100%; padding:14px 16px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); margin-bottom:12px; font-family:var(--font-body);" />
+         <p class="hint" style="margin-bottom:14px;">Manage free VIP promotions or demote users by their exact account email or username.</p>
+         <input type="email" id="admin-target-email" placeholder="user@email.com or username" style="width:100%; padding:14px 16px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); margin-bottom:12px; font-family:var(--font-body);" />
          <div style="display:flex; gap:8px;">
              <button class="btn btn-vip" id="admin-grant-btn" style="flex:1;">Grant VIP Status</button>
              <button class="btn btn-secondary" id="admin-demote-btn" style="flex:1; border-color:var(--danger); color:var(--danger);">Demote to Free</button>
@@ -753,7 +900,7 @@ async function renderProfile() {
                 const targetEmail = targetInput.value.trim();
                 if(!targetEmail) {
                     msgBox.style.color = 'var(--danger)';
-                    msgBox.textContent = 'Enter an email first.';
+                    msgBox.textContent = 'Enter an email or username first.';
                     return;
                 }
                 grantBtn.disabled = true; grantBtn.textContent = 'Granting...';
@@ -776,7 +923,7 @@ async function renderProfile() {
                 const targetEmail = targetInput.value.trim();
                 if(!targetEmail) {
                     msgBox.style.color = 'var(--danger)';
-                    msgBox.textContent = 'Enter an email first.';
+                    msgBox.textContent = 'Enter an email or username first.';
                     return;
                 }
                 demoteBtn.disabled = true; demoteBtn.textContent = 'Demoting...';
@@ -968,7 +1115,7 @@ async function renderHome(){
   
   const footer = el('div','hint');
   footer.style.cssText = 'text-align:center; padding: 24px 12px; font-size: 11px; opacity: 0.6; line-height: 1.4;';
-  footer.innerHTML = 'Not affiliated with, sponsored, or endorsed by Nintendo, Creatures Inc., or GAME FREAK. Pokémon and Pokémon character names are trademarks of Nintendo. For entertainment purposes only.';
+  footer.innerHTML = 'Not affiliated with, sponsored, or endorsed by Nintendo, Creatures Inc., or GAME FREAK. Pokémon and Pokémon character names are trademarks of Nintendo. For entertainment and simulation purposes only. Virtual credits have no cash value and cannot be redeemed for real-world currency.';
   setsWrap.appendChild(footer);
   
   app.appendChild(setsWrap);
@@ -979,7 +1126,8 @@ async function renderHome(){
     grid.innerHTML = '';
     sets.forEach(s=>{
       const card = el('div','set-card');
-      card.innerHTML = `<img src="" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${s.packCost} cr</div>`;
+      const costDisplay = s.packCost || 150;
+      card.innerHTML = `<img src="" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
       card.addEventListener('click', ()=> render('set', { set: s }));
       grid.appendChild(card);
       ImgCache.get(s.images.symbol).then(src => card.querySelector('img').src = src);
@@ -1125,22 +1273,28 @@ async function beginOpen(setMeta, packCost){
   }
 
   if(!isVip() && currentCredits() < packCost){ return openGetCreditsModal(true); }
-  const btn = $('#open-pack-btn'); btn.disabled = true; btn.textContent = 'Loading cards…';
+  const btn = $('#open-pack-btn'); if(btn) { btn.disabled = true; btn.textContent = 'Loading cards…'; }
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
 
     if(isVip()){
     } else if(guestMode){
-      const gs = getGuestState(); gs.credits -= packCost; gs.usedFreePack = true;
-      setGuestState(gs); $('#credit-count').textContent = gs.credits;
+      const gs = getGuestState(); 
+      gs.credits -= packCost; 
+      gs.usedFreePack = true;
+      setGuestState(gs); 
+      const creditCountEl = $('#credit-count');
+      if(creditCountEl) creditCountEl.textContent = gs.credits;
     } else {
       const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: packCost });
       if(error) throw error;
-      profile.credits = newBalance; $('#credit-count').textContent = newBalance;
+      profile.credits = newBalance; 
+      const creditCountEl = $('#credit-count');
+      if(creditCountEl) creditCountEl.textContent = newBalance;
     }
 
     const pack = generatePack(cards);
-    btn.textContent = 'Caching pack assets...';
+    if(btn) btn.textContent = 'Caching pack assets...';
     
     const urlsToPrefetch = [setMeta.images.logo];
     if(setMeta.resolvedPackArt) urlsToPrefetch.push(setMeta.resolvedPackArt);
@@ -1158,28 +1312,23 @@ async function beginOpen(setMeta, packCost){
     
     await Promise.all(urlsToPrefetch.map(url => ImgCache.get(url).catch(()=>null)));
     
-    if(!guestMode){
+    if(!guestMode && session){
       await sb.from('openings').insert({ user_id: session.user.id, set_id: setMeta.id, set_name: setMeta.name, cards: pack.cards.map(p=>({id:p.card.id,name:p.card.name,rarity:p.card.rarity,image:p.card.images.small})), cost: packCost });
     }
-    persistToCollection(pack.cards);
+    persistToActiveCollection(pack.cards);
     openRevealScreen(setMeta, pack, bgUrl);
   }catch(e){
     toast(e.message==='insufficient_credits' ? 'Not enough credits' : 'Something went wrong — try again');
-  }finally{ btn.disabled=false; btn.textContent = isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${packCost} credits`; }
-}
-
-function persistToCollection(packCards){
-  const coll = store.get('collection', {});
-  packCards.forEach(p=>{
-    const c = p.card;
-    coll[c.id] = coll[c.id] || { name:c.name, image:c.images.small, rarity:c.rarity, count:0 };
-    coll[c.id].count++;
-  });
-  store.set('collection', coll);
+  }finally{ 
+    if(btn) { 
+      btn.disabled=false; 
+      btn.textContent = isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${packCost} credits`; 
+    } 
+  }
 }
 
 function openRevealScreen(setMeta, pack, bgUrl){
-  const collection = store.get('collection', {});
+  const collection = getActiveCollectionCards();
   const screen = el('div','reveal-screen');
   let idx = 0; let bestTier = 0;
   screen.innerHTML = `
@@ -1315,18 +1464,129 @@ function showSummary(setMeta, pack){
   $('#sum-close', sheet).addEventListener('click', ()=>{ overlay.remove(); render('home'); });
 }
 
+/* ============================================================
+   Collection View (With Binders, Rename, Delete, Export/Import)
+   ============================================================ */
 function renderCollection(){
-  const coll = store.get('collection', {});
+  const map = getCollectionsMap();
+  const activeName = getActiveCollectionName();
+  const coll = map[activeName] || {};
   const keys = Object.keys(coll);
+
   const wrap = el('div');
-  if(!keys.length){
-    wrap.innerHTML = `<div class="section-title">Collection</div><div class="empty-state">No cards yet — open your first pack to start your binder.</div>`;
-  } else {
-    wrap.innerHTML = `<div class="section-title">Collection · ${keys.length} unique cards</div><div class="collection-grid" id="coll-grid"></div>`;
-  }
+  wrap.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="section-title" style="margin:0;">My Binders</div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary" id="export-coll-btn" style="padding:6px 12px; font-size:12px;">💾 Export (.pkcard)</button>
+          <label class="btn btn-secondary" style="padding:6px 12px; font-size:12px; cursor:pointer; margin:0;">
+            📂 Import <input type="file" id="import-coll-file" accept=".json,.pkcard" style="display:none;"/>
+          </label>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="binder-select" style="padding:8px 12px; border-radius:10px; background:var(--panel); color:var(--text); border:1px solid var(--edge); font-family:var(--font-body); flex:1;">
+          ${Object.keys(map).map(b => `<option value="${b}" ${b===activeName?'selected':''}>📁 ${b} (${Object.values(map[b]).reduce((s,c)=>s+c.count,0)} cards)</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" id="new-binder-btn" style="padding:8px 14px; font-size:13px;">+ New Binder</button>
+        <button class="btn btn-secondary" id="rename-binder-btn" style="padding:8px 12px; font-size:13px;">✏️ Rename</button>
+        <button class="btn btn-secondary" id="delete-binder-btn" style="padding:8px 12px; font-size:13px; color:var(--danger); border-color:var(--danger);">🗑️ Delete</button>
+      </div>
+      <div class="hint" style="font-size:11px;">💡 Tap any card in your binder to view details or sell it back for 70% of estimated market value in virtual credits.</div>
+    </div>
+
+    ${!keys.length ? `<div class="empty-state">Binder "${activeName}" is empty — open your first pack to start collecting!</div>` : `<div class="collection-grid" id="coll-grid"></div>`}
+  `;
   app.appendChild(wrap);
+
+  $('#binder-select', wrap).addEventListener('change', (e) => {
+    store.set('active_collection', e.target.value);
+    render('collection');
+  });
+
+  $('#new-binder-btn', wrap).addEventListener('click', () => {
+    const bName = prompt('Enter a name for the new binder:');
+    if(!bName || !bName.trim()) return;
+    const name = bName.trim();
+    if(map[name]) { toast('Binder already exists'); return; }
+    map[name] = {};
+    store.set('user_collections', map);
+    store.set('active_collection', name);
+    render('collection');
+    toast(`Created binder "${name}"`);
+  });
+
+  $('#rename-binder-btn', wrap).addEventListener('click', () => {
+    if(Object.keys(map).length <= 1) { toast('Cannot rename your only binder'); return; }
+    const newName = prompt(`Rename binder "${activeName}" to:`, activeName);
+    if(!newName || !newName.trim() || newName.trim() === activeName) return;
+    const trimmed = newName.trim();
+    if(map[trimmed]) { toast('A binder with that name already exists'); return; }
+    map[trimmed] = map[activeName];
+    delete map[activeName];
+    store.set('user_collections', map);
+    store.set('active_collection', trimmed);
+    render('collection');
+    toast('Binder renamed successfully');
+  });
+
+  $('#delete-binder-btn', wrap).addEventListener('click', () => {
+    if(Object.keys(map).length <= 1) { toast('Cannot delete your last remaining binder'); return; }
+    if(!confirm(`Are you sure you want to permanently delete binder "${activeName}" and all its cards?`)) return;
+    delete map[activeName];
+    store.set('user_collections', map);
+    store.set('active_collection', Object.keys(map)[0]);
+    render('collection');
+    toast('Binder permanently deleted');
+  });
+
+  $('#export-coll-btn', wrap).addEventListener('click', () => {
+    const exportData = {
+      version: 1,
+      exportDate: new Date().toISOString(),
+      binderName: activeName,
+      collection: coll
+    };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+    const dlAnchor = document.createElement('a');
+    dlAnchor.setAttribute("href", dataStr);
+    dlAnchor.setAttribute("download", `${activeName.toLowerCase().replace(/\s+/g, '_')}_collection.pkcard`);
+    document.body.appendChild(dlAnchor);
+    dlAnchor.click();
+    dlAnchor.remove();
+    toast('Collection exported successfully (.pkcard)');
+  });
+
+  $('#import-coll-file', wrap).addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        const importedColl = parsed.collection || parsed;
+        const bName = parsed.binderName || 'Imported Binder';
+        let uniqueName = bName;
+        let counter = 1;
+        while(map[uniqueName]) {
+          uniqueName = `${bName} (${counter++})`;
+        }
+        map[uniqueName] = importedColl;
+        store.set('user_collections', map);
+        store.set('active_collection', uniqueName);
+        render('collection');
+        toast(`Successfully imported binder "${uniqueName}"!`);
+      } catch(err) {
+        toast('Invalid file format. Could not import collection.');
+      }
+    };
+    reader.readAsText(file);
+  });
+
   if(keys.length){
-    const grid = $('#coll-grid');
+    const grid = $('#coll-grid', wrap);
     keys.sort((a,b)=> classify(coll[b].rarity).id - classify(coll[a].rarity).id).forEach(id=>{
       const c = coll[id]; const item = el('div','coll-item');
       item.innerHTML = `<img src=""/><span class="count">×${c.count}</span>`;
@@ -1335,6 +1595,71 @@ function renderCollection(){
       ImgCache.get(c.image).then(src => item.querySelector('img').src = src);
     });
   }
+}
+
+/* ============================================================
+   Trading System (Individual Cards & Entire Collections)
+   ============================================================ */
+function renderTrade(){
+  const wrap = el('div');
+  wrap.innerHTML = `
+    <div class="section-title">Card & Collection Trading</div>
+    <div class="account-card" style="margin-bottom:16px;">
+      <h3 style="margin-top:0; color:var(--cyan);">🤝 Trade Hub</h3>
+      <p class="hint">Trade individual cards or share your entire collection binder with friends via secure trade links or direct peer codes. All trades involve virtual items and simulation currency only.</p>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:14px;">
+      <div class="account-card">
+        <h4 style="margin-top:0;">1. Create Trade Offer</h4>
+        <p class="hint" style="margin-bottom:10px;">Select what you want to offer from your active binder.</p>
+        <button class="btn btn-primary" id="generate-trade-offer-btn" style="width:100%;">Generate Trade Code for Active Binder</button>
+        <div id="trade-code-output" class="hint" style="margin-top:10px; word-break:break-all; font-family:monospace; color:var(--cyan);"></div>
+      </div>
+
+      <div class="account-card">
+        <h4 style="margin-top:0;">2. Accept Incoming Trade</h4>
+        <p class="hint" style="margin-bottom:10px;">Paste a trade offer code received from another collector.</p>
+        <textarea id="incoming-trade-input" placeholder="Paste trade code here..." style="width:100%; height:80px; padding:10px; border-radius:10px; background:var(--panel); color:var(--text); border:1px solid var(--edge); font-family:monospace; font-size:12px; box-sizing:box-sizing; margin-bottom:8px;"></textarea>
+        <button class="btn btn-secondary" id="accept-trade-btn" style="width:100%;">Review & Accept Trade</button>
+      </div>
+    </div>
+  `;
+  app.appendChild(wrap);
+
+  $('#generate-trade-offer-btn', wrap).addEventListener('click', () => {
+    const activeName = getActiveCollectionName();
+    const coll = getActiveCollectionCards();
+    const tradePayload = {
+      sender: session ? session.user.email : 'Guest Collector',
+      binderName: activeName,
+      collection: coll,
+      timestamp: Date.now()
+    };
+    const encoded = btoa(JSON.stringify(tradePayload));
+    $('#trade-code-output', wrap).textContent = encoded;
+    toast('Trade offer generated successfully!');
+  });
+
+  $('#accept-trade-btn', wrap).addEventListener('click', () => {
+    const code = $('#incoming-trade-input', wrap).value.trim();
+    if(!code) { toast('Please paste a valid trade code'); return; }
+    try {
+      const decoded = JSON.parse(atob(code));
+      if(!decoded.collection) throw new Error();
+      const map = getCollectionsMap();
+      let importedName = `Trade from ${decoded.sender || 'Collector'}`;
+      let uniqueName = importedName;
+      let c = 1;
+      while(map[uniqueName]) { uniqueName = `${importedName} (${c++})`; }
+      map[uniqueName] = decoded.collection;
+      store.set('user_collections', map);
+      toast(`Trade accepted! Added binder "${uniqueName}" to your collection.`);
+      $('#incoming-trade-input', wrap).value = '';
+    } catch(err) {
+      toast('Invalid trade code format.');
+    }
+  });
 }
 
 function openGetCreditsModal(lowBalance=false){
@@ -1349,7 +1674,7 @@ function openGetCreditsModal(lowBalance=false){
     sheet.innerHTML = `
       <div class="sheet-handle"></div>
       <h2>${lowBalance ? 'Your free packs are used up' : 'Get more credits'}</h2>
-      <div class="sub">Guest mode gets up to 5 free packs per device — sign in to unlock referrals and save your collection permanently.</div>
+      <div class="sub">Guest mode gets ${CONFIG.ECONOMY.GUEST_CREDITS} credits per device — sign in to unlock referrals and save your collection permanently.</div>
       <div class="bundle" style="flex-direction:column;align-items:stretch;gap:10px;">
         <div>
           <div class="amt">Log in or create an account</div>
