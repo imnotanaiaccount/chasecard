@@ -3,221 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Chase Cards - Realistic TCG Pack Simulator</title>
+<meta name="description" content="Open realistic Pokémon-style booster packs, collect cards, and chase rare pulls. Free to play, no download required.">
+<meta name="theme-color" content="#0f172a">
+<meta name="robots" content="index, follow">
 
-<!--
-==============================================================================
- SUPABASE SETUP — run this once in your Supabase project's SQL editor.
- This app needs a real backend for credits/referrals so nothing can be
- faked or edited client-side (that would be a shortcut and a cheat vector).
-==============================================================================
+<meta property="og:type" content="website">
+<meta property="og:title" content="PackPull — Pokémon Booster Simulator">
+<meta property="og:description" content="Open realistic booster packs, collect cards, and chase rare pulls.">
+<meta property="og:image" content="https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/icon-512.png">
+<meta name="twitter:card" content="summary_large_image">
 
-create table profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  email text,
-  credits integer not null default 500,
-  referral_code text unique not null,
-  referred_by uuid references profiles(id),
-  is_premium boolean not null default false,
-  premium_tier text,
-  last_daily_grant date,
-  stripe_customer_id text,
-  created_at timestamptz default now()
-);
+<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/icon-192.png">
+<link rel="apple-touch-icon" href="https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/icon-192.png">
 
--- public-safe lookup view so referral codes can be resolved without exposing
--- every user's balance/email through row-level security
-create view referral_lookup as select id, referral_code from profiles;
+<title>PackPull — Real Pokémon Booster Simulator</title>
 
-create table openings (
-  id bigint generated always as identity primary key,
-  user_id uuid references profiles(id) on delete cascade,
-  set_id text not null,
-  set_name text not null,
-  cards jsonb not null,
-  cost integer not null,
-  created_at timestamptz default now()
-);
-
-create or replace function handle_new_user()
-returns trigger language plpgsql security definer as $$
-begin
-  insert into profiles (id, email, referral_code)
-  values (new.id, new.email, substr(md5(random()::text || new.id::text), 1, 8));
-  return new;
-end; $$;
-create trigger on_auth_user_created after insert on auth.users
-  for each row execute function handle_new_user();
-
-create or replace function spend_credits(p_amount integer)
-returns integer language plpgsql security definer as $$
-declare new_balance integer;
-begin
-  update profiles set credits = credits - p_amount
-  where id = auth.uid() and credits >= p_amount
-  returning credits into new_balance;
-  if new_balance is null then raise exception 'insufficient_credits'; end if;
-  return new_balance;
-end; $$;
-
-create or replace function redeem_referral(p_code text)
-returns void language plpgsql security definer as $$
-declare v_referrer uuid;
-begin
-  select id into v_referrer from profiles where referral_code = p_code and id != auth.uid();
-  if v_referrer is null then raise exception 'invalid_code'; end if;
-  update profiles set referred_by = v_referrer where id = auth.uid() and referred_by is null;
-  if found then
-    update profiles set credits = credits + 250 where id = v_referrer;
-    update profiles set credits = credits + 250 where id = auth.uid();
-  end if;
-end; $$;
-
--- only ever called from a trusted server context (Stripe webhook edge
--- function with the service-role key), never from this client file
-create or replace function add_credits(p_user uuid, p_amount integer)
-returns void language plpgsql security definer as $$
-begin
-  update profiles set credits = credits + p_amount where id = p_user;
-end; $$;
-
-alter table profiles enable row level security;
-create policy "read own profile" on profiles for select using (auth.uid() = id);
-alter table openings enable row level security;
-create policy "own openings" on openings for all using (auth.uid() = user_id);
-==============================================================================
-
- SUPABASE EDGE FUNCTIONS — two functions needed for fast/wallet checkout.
- Deploy both with the Stripe SECRET key as an env var (never in client code).
- `supabase functions deploy create-checkout-session` / `stripe-webhook`
-
- ---- functions/create-checkout-session/index.ts ----
- // Auth required — reads the caller's user id from their JWT, so credits
- // can only ever be attached to the account that actually paid.
- import Stripe from 'npm:stripe';
- import { createClient } from 'npm:@supabase/supabase-js@2';
- const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
- Deno.serve(async (req) => {
-   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-     { global: { headers: { Authorization: req.headers.get('Authorization')! } } });
-   const { data: { user } } = await sb.auth.getUser();
-   if (!user) return new Response('unauthorized', { status: 401 });
-   const { bundle } = await req.json(); // 'starter' | 'booster' | 'elite'
-   const PRICES = { starter: 'price_XXX', booster: 'price_YYY', elite: 'price_ZZZ' }; // Stripe Price IDs
-   if (!PRICES[bundle]) return new Response('bad bundle', { status: 400 });
-   const session = await stripe.checkout.sessions.create({
-     mode: 'payment',
-     line_items: [{ price: PRICES[bundle], quantity: 1 }],
-     automatic_payment_methods: { enabled: true },
-     client_reference_id: user.id,
-     metadata: { user_id: user.id, bundle },
-     success_url: `${Deno.env.get('APP_URL')}?bought=${bundle}`,
-     cancel_url: Deno.env.get('APP_URL')!,
-   });
-   return Response.json({ url: session.url });
- });
-
- ---- functions/stripe-webhook/index.ts ----
- import Stripe from 'npm:stripe';
- import { createClient } from 'npm:@supabase/supabase-js@2';
- const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
- const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
- const CREDIT_AMOUNTS = { starter: 500, booster: 2200, elite: 6000 };
- Deno.serve(async (req) => {
-   const sig = req.headers.get('stripe-signature')!;
-   const body = await req.text();
-   const event = stripe.webhooks.constructEvent(body, sig, Deno.env.get('STRIPE_WEBHOOK_SECRET')!);
-   if (event.type === 'checkout.session.completed') {
-     const s = event.data.object;
-     const amount = CREDIT_AMOUNTS[s.metadata.bundle];
-     if (amount) await sbAdmin.rpc('add_credits', { p_user: s.metadata.user_id, p_amount: amount });
-   }
-   return new Response('ok', { status: 200 });
- });
-
- ---- functions/create-subscription-checkout/index.ts ----
- import Stripe from 'npm:stripe';
- import { createClient } from 'npm:@supabase/supabase-js@2';
- const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
- const TIER_PRICE_ENV = { starter: 'STRIPE_PRICE_STARTER', plus: 'STRIPE_PRICE_PLUS', pro: 'STRIPE_PRICE_PRO', elite: 'STRIPE_PRICE_ELITE' };
- Deno.serve(async (req) => {
-   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-     { global: { headers: { Authorization: req.headers.get('Authorization')! } } });
-   const { data: { user } } = await sb.auth.getUser();
-   if (!user) return new Response('unauthorized', { status: 401 });
-   const { tier } = await req.json();
-   const priceEnvKey = TIER_PRICE_ENV[tier];
-   if (!priceEnvKey) return new Response('bad_tier', { status: 400 });
-   const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-   const { data: prof } = await sbAdmin.from('profiles').select('stripe_customer_id').eq('id', user.id).single();
-   const session = await stripe.checkout.sessions.create({
-     mode: 'subscription',
-     customer: prof?.stripe_customer_id || undefined,
-     customer_email: prof?.stripe_customer_id ? undefined : user.email,
-     line_items: [{ price: Deno.env.get(priceEnvKey)!, quantity: 1 }],
-     automatic_payment_methods: { enabled: true },
-     client_reference_id: user.id,
-     metadata: { user_id: user.id, tier },
-     success_url: `${Deno.env.get('APP_URL')}?subscribed=1`,
-     cancel_url: Deno.env.get('APP_URL')!,
-   });
-   return Response.json({ url: session.url });
- });
-
- ---- functions/create-billing-portal-session/index.ts ----
- import Stripe from 'npm:stripe';
- import { createClient } from 'npm:@supabase/supabase-js@2';
- const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
- Deno.serve(async (req) => {
-   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-     { global: { headers: { Authorization: req.headers.get('Authorization')! } } });
-   const { data: { user } } = await sb.auth.getUser();
-   if (!user) return new Response('unauthorized', { status: 401 });
-   const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-   const { data: prof } = await sbAdmin.from('profiles').select('stripe_customer_id').eq('id', user.id).single();
-   if (!prof?.stripe_customer_id) return new Response('no_subscription', { status: 400 });
-   const portal = await stripe.billingPortal.sessions.create({
-     customer: prof.stripe_customer_id,
-     return_url: Deno.env.get('APP_URL')!,
-   });
-   return Response.json({ url: portal.url });
- });
-
- ---- functions/stripe-webhook/index.ts (extended) ----
- import Stripe from 'npm:stripe';
- import { createClient } from 'npm:@supabase/supabase-js@2';
- const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!);
- const sbAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
- const PRICE_TO_TIER = {
-   [Deno.env.get('STRIPE_PRICE_STARTER')!]: 'starter',
-   [Deno.env.get('STRIPE_PRICE_PLUS')!]: 'plus',
-   [Deno.env.get('STRIPE_PRICE_PRO')!]: 'pro',
-   [Deno.env.get('STRIPE_PRICE_ELITE')!]: 'elite',
- };
- Deno.serve(async (req) => {
-   const sig = req.headers.get('stripe-signature')!;
-   const body = await req.text();
-   const event = stripe.webhooks.constructEvent(body, sig, Deno.env.get('STRIPE_WEBHOOK_SECRET')!);
-   if (event.type === 'checkout.session.completed') {
-     const s = event.data.object;
-     if (s.mode === 'subscription' && s.metadata?.tier) {
-       await sbAdmin.from('profiles').update({ is_premium: true, premium_tier: s.metadata.tier, stripe_customer_id: s.customer })
-         .eq('id', s.metadata.user_id);
-     }
-   }
-   if (event.type === 'customer.subscription.updated') {
-     const s = event.data.object;
-     const newTier = PRICE_TO_TIER[s.items.data[0]?.price?.id];
-     if (newTier) await sbAdmin.from('profiles').update({ premium_tier: newTier }).eq('stripe_customer_id', s.customer);
-   }
-   if (event.type === 'customer.subscription.deleted') {
-     const s = event.data.object;
-     await sbAdmin.from('profiles').update({ is_premium: false, premium_tier: null }).eq('stripe_customer_id', s.customer);
-   }
-   return new Response('ok', { status: 200 });
- });
-==============================================================================
--->
+<!-- Backend setup (Supabase schema, RLS policies, Stripe edge functions) lives in
+     SETUP.md, not here — keeping it out of the shipped HTML means it isn't
+     readable via "View Source" on the live site. -->
 
 <link rel="stylesheet" href="styles.css">
 </head>
