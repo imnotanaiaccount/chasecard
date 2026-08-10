@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>PackPull — Real Pokémon Booster Simulator</title>
 
 <!--
@@ -305,9 +305,35 @@ input:focus{outline:none; border-color:var(--cyan);}
 /* ---------- Pack detail & 3D virtual pack representation ---------- */
 .pack-hero{display:flex; flex-direction:column; align-items:center; text-align:center; padding:26px 10px 10px; perspective:1000px;}
 .pack-hero img.logo{height:44px; object-fit:contain; margin-bottom:10px; transition:opacity 0.2s;}
-.pack-art{width:190px; height:264px; border-radius:14px; position:relative; margin:14px 0 20px; background:linear-gradient(160deg,#1c2130,#0d1017); border:1px solid var(--edge); box-shadow:0 20px 50px -12px rgba(0,0,0,0.6); overflow:hidden; transform-style:preserve-3d; transform:rotateY(-3deg) rotateX(2deg); transition:transform 0.3s ease, box-shadow 0.3s ease;}
-.pack-art:hover{transform:rotateY(0deg) rotateX(0deg) scale(1.02); box-shadow:0 25px 60px -10px rgba(77,232,224,0.25);}
+
+/* NEW: Horizontal Pack Gallery */
+.pack-gallery {
+  display: flex; gap: 20px; overflow-x: auto; padding: 20px 20px 30px; 
+  scroll-snap-type: x mandatory; width: 100vw; max-width: 560px;
+  -webkit-overflow-scrolling: touch; justify-content: flex-start;
+  margin-top: 10px; margin-bottom: 0;
+}
+.pack-gallery.single { justify-content: center; }
+.pack-gallery::-webkit-scrollbar { display: none; }
+
+.pack-art{width:190px; height:264px; border-radius:14px; position:relative; background:linear-gradient(160deg,#1c2130,#0d1017); border:1px solid var(--edge); box-shadow:0 20px 50px -12px rgba(0,0,0,0.6); overflow:hidden; transform-style:preserve-3d; transform:rotateY(-3deg) rotateX(2deg); transition:transform 0.3s ease, box-shadow 0.3s ease;}
 .pack-art::before{content:''; position:absolute; inset:0; background:conic-gradient(from 200deg,var(--cyan),var(--magenta),var(--gold),var(--cyan)); opacity:0.14; animation:spin 6s linear infinite; z-index:1; pointer-events:none;}
+
+/* Overrides for Pack Art inside Gallery */
+.pack-gallery .pack-art {
+  flex: 0 0 auto; scroll-snap-align: center; margin: 0;
+  opacity: 0.5; transform: scale(0.9) translateY(10px); 
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  cursor: pointer;
+}
+.pack-gallery .pack-art.active {
+  opacity: 1; transform: scale(1.05) rotateY(-3deg) rotateX(2deg);
+  box-shadow: 0 25px 60px -10px rgba(77,232,224,0.35), 0 0 0 2px var(--gold);
+  z-index: 10;
+}
+.pack-gallery .pack-art:hover:not(.active) {
+  opacity: 0.8; transform: scale(0.95) translateY(5px);
+}
 
 /* Core Pack Art Layer */
 .pack-art-bg{position:absolute; inset:0; z-index:2; transition:background-image 0.3s ease;}
@@ -346,7 +372,7 @@ input:focus{outline:none; border-color:var(--cyan);}
 .reveal-screen{position:fixed; inset:0; background:radial-gradient(circle at 50% 20%,#171d2b,var(--void) 70%); z-index:100; display:flex; flex-direction:column; align-items:center; padding:calc(20px + var(--safe-top)) 16px calc(20px + var(--safe-bottom)); overflow-y:auto;}
 .reveal-header{width:100%; max-width:520px; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;}
 .reveal-progress{font-family:var(--font-mono); font-size:13px; color:var(--dim);}
-.close-x{width:34px; height:34px; border-radius:50%; background:var(--panel); display:flex; align-items:center; justify-content:center; color:var(--dim);}
+.close-x{width:44px; height:44px; border-radius:50%; background:var(--panel); display:flex; align-items:center; justify-content:center; color:var(--dim);}
 .stage{flex:1; width:100%; max-width:400px; display:flex; align-items:center; justify-content:center; perspective:1200px;}
 .flipcard{width:250px; height:349px; position:relative; transform-style:preserve-3d; -webkit-transform-style:preserve-3d; transition:transform .55s cubic-bezier(.2,.8,.2,1); touch-action:none;}
 .flipcard.flipped{transform:rotateY(180deg);}
@@ -787,6 +813,7 @@ function openAuthModal(resumeSetMeta = null){
     <div style="height:1px; background:var(--edge); margin:20px 0;"></div>
     <button class="btn btn-secondary" type="button" id="modal-guest-btn" style="width:100%;">Continue as guest</button>
     <div class="hint" style="margin-top:8px;text-align:center;">Guests get up to 5 free packs on this device.</div>
+    <div class="hint" style="margin-top:12px; font-size:10px; color:var(--dim-2); text-align:center;">Not affiliated with Nintendo or The Pokémon Company. By continuing, you agree to our Terms of Service.</div>
   `;
   overlay.appendChild(sheet); document.body.appendChild(overlay);
   
@@ -907,6 +934,13 @@ async function renderHome(){
   setsWrap.appendChild(el('div','section-title','Choose a booster'));
   const gridHolder = el('div'); gridHolder.innerHTML = `<div class="set-grid" id="set-grid"></div>`;
   setsWrap.appendChild(gridHolder.firstChild);
+  
+  // Injecting Legal Footer
+  const footer = el('div','hint');
+  footer.style.cssText = 'text-align:center; padding: 24px 12px; font-size: 11px; opacity: 0.6; line-height: 1.4;';
+  footer.innerHTML = 'Not affiliated with, sponsored, or endorsed by Nintendo, Creatures Inc., or GAME FREAK. Pokémon and Pokémon character names are trademarks of Nintendo. For entertainment purposes only.';
+  setsWrap.appendChild(footer);
+  
   app.appendChild(setsWrap);
   const grid = $('#set-grid');
   for(let i=0;i<6;i++){ const s = el('div','set-card skeleton'); s.style.height='96px'; grid.appendChild(s); }
@@ -931,15 +965,22 @@ async function renderHome(){
 async function renderSetDetail(setMeta){
   setDetailCardsCache = null; setDetailCardsCacheSetId = null;
   const wrap = el('div');
+  
   wrap.innerHTML = `
     <div class="pack-hero">
       <img class="logo" id="hero-logo" src="" alt=""/>
-      <div class="pack-art is-fallback" id="pack-art">
-        <div class="pack-art-bg skeleton" id="pack-art-bg"></div>
-        <div class="pack-crimp top fallback-only"></div>
-        <div class="pack-crimp bottom fallback-only"></div>
-        <img class="pack-art-logo fallback-only" id="pack-art-logo" src=""/>
+      
+      <div id="pack-gallery-wrap" style="width: 100%; display: flex; flex-direction: column; align-items: center;">
+          <div class="pack-gallery single" id="pack-gallery">
+            <div class="pack-art is-fallback active" id="skeleton-art">
+              <div class="pack-art-bg skeleton"></div>
+              <div class="pack-crimp top fallback-only"></div>
+              <div class="pack-crimp bottom fallback-only"></div>
+              <img class="pack-art-logo fallback-only" id="pack-art-logo" src=""/>
+            </div>
+          </div>
       </div>
+
       <div class="pack-count">10 cards per pack · ${setMeta.total} cards in ${setMeta.name}</div>
       <button class="btn btn-primary" id="open-pack-btn" style="width:100%;">${isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${CONFIG.ECONOMY.PACK_COST} credits`}</button>
       <div class="odds-box">
@@ -953,63 +994,107 @@ async function renderSetDetail(setMeta){
   $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta));
   
   ImgCache.get(setMeta.images.logo).then(src => {
-    $('#hero-logo').src = src; $('#pack-art-logo').src = src;
+    $('#hero-logo').src = src; 
+    const fal = $('#pack-art-logo', wrap);
+    if(fal) fal.src = src;
   });
 
   try{
     const cards = await getCardsForSet(setMeta.id);
     setDetailCardsCache = cards; setDetailCardsCacheSetId = setMeta.id;
+    
+    const gallery = $('#pack-gallery', wrap);
+    
+    const idLower = setMeta.id.toLowerCase();
+    const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
+    
+    let isFallbackList = false;
+    let rawUrls = [];
+    
+    try {
+      const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
+      const ghRes = await fetch(githubApiUrl);
+      if (ghRes.ok) {
+        const files = await ghRes.json();
+        const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
+        // Sort files to keep order consistent
+        images.sort((a,b) => a.name.localeCompare(b.name));
+        // Push every single uncompressed image available for this set
+        rawUrls = images.map(img => img.download_url);
+      }
+    } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
+
+    // If GitHub API fails or is empty, provide hardcoded high-quality fallbacks
+    if (rawUrls.length === 0) {
+      isFallbackList = true;
+      rawUrls = [
+        `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
+        `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
+        tcgdexBase ? `${tcgdexBase}/pack/high.webp` : null
+      ].filter(Boolean);
+    }
+
+    const validUrls = [];
+    for(const url of rawUrls) {
+      try {
+        const resolved = await ImgCache.get(url);
+        if(resolved) {
+          validUrls.push(resolved);
+          if (isFallbackList) break; // If we just used the fallback list, we only need the first valid one
+        }
+      } catch(err) { continue; }
+    }
+
+    const uniqueValidUrls = [...new Set(validUrls)];
+    gallery.innerHTML = ''; // Clear skeleton
+
+    if (uniqueValidUrls.length === 0) {
+        // Ultimate fallback if no assets load at all
+        const pa = el('div', 'pack-art is-fallback active');
+        pa.innerHTML = `<div class="pack-art-bg"></div><div class="pack-crimp top fallback-only"></div><div class="pack-crimp bottom fallback-only"></div><img class="pack-art-logo fallback-only" id="pack-art-logo" src="${ImgCache.sync(setMeta.images.logo)}"/>`;
+        gallery.appendChild(pa);
+        gallery.classList.add('single');
+        setMeta.resolvedPackArt = null;
+    } else {
+        if (uniqueValidUrls.length === 1) gallery.classList.add('single');
+        else gallery.classList.remove('single');
+        
+        uniqueValidUrls.forEach((url, i) => {
+            const pa = el('div', `pack-art ${i === 0 ? 'active' : ''}`);
+            pa.innerHTML = `<div class="pack-art-bg" style="background-image:url('${url}'); background-size:100% 100%; background-repeat:no-repeat; background-position:center;"></div>`;
+            
+            pa.addEventListener('click', () => {
+                gallery.querySelectorAll('.pack-art').forEach(el => el.classList.remove('active'));
+                pa.classList.add('active');
+                pa.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                // Whichever art the user selects is saved here and carried over to the open animation
+                setMeta.resolvedPackArt = url; 
+            });
+            
+            gallery.appendChild(pa);
+            if (i === 0) setMeta.resolvedPackArt = url; 
+        });
+        
+        if (uniqueValidUrls.length > 1) {
+            const hint = el('div', 'hint');
+            hint.style.marginTop = '4px';
+            hint.style.marginBottom = '12px';
+            hint.style.fontWeight = '600';
+            hint.style.color = 'var(--cyan)';
+            hint.textContent = '← Swipe & tap to choose pack art →';
+            $('#pack-gallery-wrap', wrap).appendChild(hint);
+        }
+    }
+
     const hits = cards.filter(c => classify(c.rarity).id >= 4);
     const feature = hits.length ? hits[Math.floor(Math.random()*hits.length)] : cards[0];
-    const bg = $('#pack-art-bg', wrap);
-    const packArt = $('#pack-art', wrap);
-    
-    if(bg){
-      bg.classList.remove('skeleton');
-      
-      const idLower = setMeta.id.toLowerCase();
-      const idUpper = setMeta.id.toUpperCase();
-      const cleanName = setMeta.name.replace(/[^a-zA-Z0-9 -]/g, '').trim();
-      const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
-      
-      // Dynamic resolution hierarchy targeting TCGdex API and raw GitHub assets
-      const assetCandidates = [
-        tcgdexBase ? `${tcgdexBase}/pack/high.webp` : null,
-        `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${encodeURIComponent(setMeta.name)}.png`,
-        `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${encodeURIComponent(cleanName)}.png`,
-        `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${idLower}.png`,
-        `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${idUpper}.png`,
-        `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${encodeURIComponent(setMeta.name)}.jpg`,
-        `https://raw.githubusercontent.com/carltondickson/pokemon-tcg-booster-packs/main/assets/${idLower}.jpg`
-      ].filter(Boolean);
-
-      let loadedSrc = '';
-      for(const candidateUrl of assetCandidates) {
-        try {
-          const resolved = await ImgCache.get(candidateUrl);
-          if(resolved) {
-            loadedSrc = resolved;
-            break;
-          }
-        } catch(err) { continue; }
-      }
-
-      if(loadedSrc) {
-        bg.style.backgroundImage = `url(${loadedSrc})`;
-        bg.style.backgroundSize = '100% 100%';
-        bg.style.backgroundRepeat = 'no-repeat';
-        bg.style.backgroundPosition = 'center';
-        packArt.classList.remove('is-fallback');
-        setMeta.resolvedPackArt = loadedSrc; 
-      } else {
-        packArt.classList.add('is-fallback');
-        const hl = $('#hero-logo', wrap);
-        if(hl) hl.style.display = 'none';
-      }
-    }
     if(feature?.images?.large){ ImgCache.get(feature.images.large); }
-  }catch(e){ /* silently defaults to the fallback presentation */ }
+
+  }catch(e){ 
+    // silently defaults to the fallback presentation 
+  }
 }
+
 let setDetailCardsCache = null, setDetailCardsCacheSetId = null;
 
 function isVip(){ return !guestMode && profile?.premium_tier === 'vip'; }
@@ -1102,7 +1187,8 @@ function openRevealScreen(setMeta, pack, bgUrl){
   const flashLayer = el('div','flash-layer'); document.body.appendChild(flashLayer);
 
   const intro = el('div','pack-intro');
-  let authenticPackBg = setMeta.resolvedPackArt ? `url(${ImgCache.sync(setMeta.resolvedPackArt)})` : '';
+  // Use the exact pack art URL the user selected
+  let authenticPackBg = setMeta.resolvedPackArt ? `url('${ImgCache.sync(setMeta.resolvedPackArt)}')` : '';
   
   intro.innerHTML = `
     <div class="pack-art ${setMeta.resolvedPackArt ? '' : 'is-fallback'}" style="margin:0; animation:packshake 1.1s ease-in-out;">
