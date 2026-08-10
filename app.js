@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'chasecards-universal-images-v8';
+        const CACHE_NAME = 'chasecards-universal-images-v9';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -409,7 +409,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v8');
+        const cache = await caches.open('chasecards-universal-images-v9');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -1455,7 +1455,7 @@ async function renderSetDetail(setMeta){
   setDetailCardsCache = null; setDetailCardsCacheSetId = null;
   const wrap = el('div');
   const dynamicCost = setMeta.packCost || 150;
-  const boxCost = dynamicCost * 30; // 36 packs discounted to 30 pack price for Booster Box
+  const boxCost = dynamicCost * 30; // 36 packs discounted
   
   wrap.innerHTML = `
     <div class="pack-hero">
@@ -1679,12 +1679,13 @@ async function beginBoosterBox(setMeta, boxCost) {
     $('#credit-count').textContent = newBalance;
   }
 
-  toast('Opening Booster Box (36 Packs)...');
   const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
   
   const allBoxCards = [];
+  const allPacks = [];
   for(let i=0; i<36; i++) {
     const pk = generatePack(cards);
+    allPacks.push(pk);
     pk.cards.forEach(c => allBoxCards.push(c));
   }
 
@@ -1694,10 +1695,124 @@ async function beginBoosterBox(setMeta, boxCost) {
   });
 
   persistToActiveCollection(allBoxCards);
-  burstConfetti(100);
+  openBoosterBoxAnimationScreen(setMeta, allPacks);
+}
+
+function openBoosterBoxAnimationScreen(setMeta, allPacks) {
+  const overlay = el('div', 'overlay');
+  overlay.style.zIndex = '400';
+  overlay.style.background = 'rgba(15, 23, 42, 0.95)';
+  overlay.style.display = 'flex';
+  overlay.style.flexDirection = 'column';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.padding = '20px';
+
+  let currentPackIndex = 0;
+  const totalPacks = allPacks.length;
+
+  overlay.innerHTML = `
+    <div style="width:100%; max-width:450px; text-align:center; animation: zoomIn 0.3s ease;">
+      <div style="font-size:22px; font-weight:bold; color:var(--gold); margin-bottom:6px; font-family:var(--font-display);">📦 BOOSTER BOX UNBOXING</div>
+      <div class="hint" style="margin-bottom:20px;">${setMeta.name} · 36 Packs Chamber</div>
+      
+      <div id="box-stage" style="position:relative; width:100%; height:320px; background:var(--panel); border:1px solid var(--edge); border-radius:18px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; box-shadow:0 20px 40px rgba(0,0,0,0.6); overflow:hidden;">
+         <div id="box-art-preview" style="width:140px; height:200px; background:linear-gradient(135deg, #3b82f6, #1e293b); border-radius:10px; margin-bottom:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); background-image:url('${setMeta.resolvedPackArt || ''}'); background-size:cover;"></div>
+         <div id="box-pack-counter" style="font-size:16px; font-weight:bold; color:var(--cyan);">Opening Pack 1 / 36</div>
+         <div id="box-hit-banner" style="font-size:13px; color:var(--gold); margin-top:6px; min-height:18px; font-weight:600;"></div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:20px; width:100%;">
+        <button class="btn btn-primary" id="rip-next-pack-btn" style="flex:1; padding:14px; font-size:16px;">⚡ Rip Next Pack</button>
+        <button class="btn btn-secondary" id="skip-box-btn" style="padding:14px;">Skip to Summary</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  SFX.tear();
+  vibrate([20,40,20]);
+
+  const counterEl = $('#box-pack-counter', overlay);
+  const hitBannerEl = $('#box-hit-banner', overlay);
+  const ripBtn = $('#rip-next-pack-btn', overlay);
+  const skipBtn = $('#skip-box-btn', overlay);
+
+  function processNextPack() {
+    if(currentPackIndex >= totalPacks) {
+      overlay.remove();
+      showBoxSummary(setMeta, allPacks);
+      return;
+    }
+
+    const pack = allPacks[currentPackIndex];
+    currentPackIndex++;
+    counterEl.textContent = `Opening Pack ${currentPackIndex} / ${totalPacks}`;
+    
+    const bestInPack = pack.cards.reduce((a,b)=> classify(b.card.rarity).id > classify(a.card.rarity).id ? b : a);
+    const tier = classify(bestInPack.card.rarity);
+
+    if(tier.id >= 4) {
+      SFX.hit();
+      vibrate([25,50,25]);
+      hitBannerEl.style.color = tier.color;
+      hitBannerEl.textContent = `✨ HIT! Pulled ${bestInPack.card.name} (${bestInPack.card.rarity})`;
+    } else {
+      SFX.common();
+      hitBannerEl.textContent = `Standard pack opened...`;
+    }
+
+    if(currentPackIndex >= totalPacks) {
+      ripBtn.textContent = '🎉 View Booster Box Summary';
+    }
+  }
+
+  ripBtn.addEventListener('click', processNextPack);
+  skipBtn.addEventListener('click', () => {
+    overlay.remove();
+    showBoxSummary(setMeta, allPacks);
+  });
+}
+
+function showBoxSummary(setMeta, allPacks) {
+  const overlay = el('div', 'overlay');
+  const sheet = el('div', 'sheet');
+  
+  const allCardsFlat = [];
+  allPacks.forEach(p => p.cards.forEach(c => allCardsFlat.push(c)));
+  const topHits = allCardsFlat.filter(p => classify(p.card.rarity).id >= 4);
+  topHits.sort((a,b) => classify(b.card.rarity).id - classify(a.card.rarity).id);
+
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>📦 Booster Box Results</h2>
+    <div class="sub">Successfully unboxed 36 packs from ${setMeta.name}! Total pulls: 360 cards.</div>
+    <div style="font-weight:bold; color:var(--cyan); margin:12px 0 6px;">Top Hits (${topHits.length} Ultra/Secret Rares Pulled):</div>
+    <div class="summary-grid" id="box-sum-grid"></div>
+    <button class="btn btn-primary" style="width:100%; margin-top:18px;" id="box-sum-close">Add All to Binders & Done</button>
+  `;
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+
+  const grid = $('#box-sum-grid', sheet);
+  if(topHits.length === 0) {
+    grid.innerHTML = '<div class="hint">No ultra-rare hits pulled in this box. Better luck next time!</div>';
+  } else {
+    topHits.slice(0, 12).forEach(p => {
+      const mini = el('div', 'mini hit');
+      mini.innerHTML = `<img src="${ImgCache.sync(p.card.images.small)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'80\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'"/>`;
+      mini.addEventListener('click', () => showCardFullscreen(ImgCache.sync(p.card.images.large || p.card.images.small), p.card));
+      grid.appendChild(mini);
+    });
+  }
+
+  burstConfetti(120);
   SFX.chase();
-  toast('Booster Box Opened! 36 packs added to your binder!');
-  render('collection');
+
+  $('#box-sum-close', sheet).addEventListener('click', () => {
+    overlay.remove();
+    render('collection');
+  });
 }
 
 function openRevealScreen(setMeta, pack, bgUrl){
