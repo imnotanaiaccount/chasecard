@@ -249,7 +249,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   
   if(guestMode) {
     const gs = getGuestState();
-    gs.credits = (gs.credits || 0) + creditsEarned;
+    gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) + creditsEarned;
     setGuestState(gs);
     $('#credit-count').textContent = gs.credits;
   } else if(profile) {
@@ -511,7 +511,7 @@ let session = null, profile = null, guestMode = false;
 
 function getGuestState(){ 
   let s = store.get('guest_state', null);
-  if(!s || s.credits === null || s.credits === undefined) {
+  if(!s || typeof s.credits !== 'number' || isNaN(s.credits)) {
     s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false };
     store.set('guest_state', s);
   }
@@ -522,7 +522,7 @@ function setGuestState(s){ store.set('guest_state', s); }
 function startGuestSession(redirect=true){
   guestMode = true;
   let s = getGuestState();
-  if(s.credits === null || s.credits === undefined){ 
+  if(isNaN(s.credits)){ 
     s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false }; 
     setGuestState(s); 
   }
@@ -537,7 +537,7 @@ function isAdminUser(){
 
 function currentCredits(){ 
   if (isAdminUser()) return '∞';
-  return guestMode ? (getGuestState().credits ?? CONFIG.ECONOMY.GUEST_CREDITS) : (profile?.credits ?? 0); 
+  return guestMode ? (Number(getGuestState().credits) || CONFIG.ECONOMY.GUEST_CREDITS) : (profile?.credits ?? 0); 
 }
 
 async function initAuth(){
@@ -563,7 +563,6 @@ async function loadProfile(){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if(!error) {
     profile = data;
-    // Only VIP tier gets daily credits (100k/day). Other tiers get monthly lump sums upfront.
     if (profile.premium_tier === 'vip') {
       const today = new Date().toISOString().slice(0, 10);
       if (profile.last_daily_grant !== today) {
@@ -1279,7 +1278,7 @@ async function beginOpen(setMeta, packCost){
       // Admin gets unlimited pack openings for free
     } else if(guestMode){
       const gs = getGuestState(); 
-      gs.credits -= packCost; 
+      gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) - packCost; 
       gs.usedFreePack = true;
       setGuestState(gs); 
       const creditCountEl = $('#credit-count');
