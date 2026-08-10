@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'chasecards-universal-images-v11';
+        const CACHE_NAME = 'chasecards-universal-images-v12';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -255,7 +255,7 @@ function buyLink(card){
 }
 
 /* ============================================================
-   Player Statistics & Gamification Store (Streaks, Quests)
+   Player Statistics Store
    ============================================================ */
 function getPlayerStats() {
   return store.get('player_stats', {
@@ -265,12 +265,7 @@ function getPlayerStats() {
     cardsSold: 0,
     totalSoldEarned: 0,
     lastLoginDate: '',
-    loginStreak: 0,
-    quests: {
-      openPacks: { current: 0, target: 5, claimed: false },
-      sellCards: { current: 0, target: 3, claimed: false },
-      pullHit: { current: 0, target: 1, claimed: false }
-    }
+    loginStreak: 0
   });
 }
 
@@ -376,9 +371,6 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   updatePlayerStats(st => {
     st.cardsSold = (st.cardsSold || 0) + 1;
     st.totalSoldEarned = (st.totalSoldEarned || 0) + creditsEarned;
-    if(st.quests.sellCards.current < st.quests.sellCards.target) {
-      st.quests.sellCards.current++;
-    }
   });
 
   if(guestMode) {
@@ -409,7 +401,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v11');
+        const cache = await caches.open('chasecards-universal-images-v12');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -533,7 +525,7 @@ async function getSets(){
       if (s.releaseDate) {
         const year = parseInt(s.releaseDate.split(/[-/]/)[0], 10);
         if (!isNaN(year) && year < 2010) {
-          cost *= 2; // 100% more expensive (doubled)
+          cost *= 2; // 100% more expensive (doubled) for pre-2010 packs
         }
       }
       return {
@@ -783,8 +775,6 @@ function render(name, params={}){
   if(name==='collection') renderCollection();
   if(name==='search') renderSearch();
   if(name==='stats') renderStats();
-  if(name==='quests') renderQuests();
-  if(name==='forge') renderForge();
   if(name==='profile') renderProfile();
   if(name==='user_collection') renderUserCollection(params.userId, params.username);
   if(name==='trade') renderTrade();
@@ -966,8 +956,6 @@ function renderTabs(){
   const items = [
     { key:'home', label:'Packs', icon:'M4 12l8-8 8 8M6 10v10h12V10' },
     { key:'collection', label:'Binders', icon:'M4 6h16M4 12h16M4 18h16' },
-    { key:'forge', label:'Forge', icon:'M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6' },
-    { key:'quests', label:'Quests', icon:'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11' },
     { key:'trade', label:'Trade', icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
     { key:'stats', label:'Stats', icon:'M18 20V10M12 20V4M6 20v-6' },
     { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
@@ -1175,135 +1163,6 @@ async function renderStats() {
   app.appendChild(wrap);
 }
 
-/* ============================================================
-   Gamification: Quests & Achievements Dashboard
-   ============================================================ */
-async function renderQuests() {
-  const stats = getPlayerStats();
-  const wrap = el('div');
-  wrap.innerHTML = `
-    <div class="section-title">Daily Quests & Achievements</div>
-    <div class="account-card" style="margin-bottom:16px;">
-      <h3 style="margin-top:0; color:var(--cyan);">🔥 Login Streak: ${stats.loginStreak || 1} Days</h3>
-      <p class="hint">Log in daily to maintain your streak and claim rewards!</p>
-    </div>
-
-    <div style="display:flex; flex-direction:column; gap:12px;">
-      ${renderQuestItem('Open 5 Packs', stats.quests.openPacks.current, stats.quests.openPacks.target, 'quest_packs', 5000)}
-      ${renderQuestItem('Sell 3 Duplicate Cards', stats.quests.sellCards.current, stats.quests.sellCards.target, 'quest_sell', 3000)}
-    </div>
-  `;
-  app.appendChild(wrap);
-
-  wrap.querySelectorAll('.claim-quest-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const qKey = btn.dataset.quest;
-      if(qKey === 'quest_packs' && !stats.quests.openPacks.claimed) {
-        stats.quests.openPacks.claimed = true;
-        awardQuestReward(5000);
-      } else if(qKey === 'quest_sell' && !stats.quests.sellCards.claimed) {
-        stats.quests.sellCards.claimed = true;
-        awardQuestReward(3000);
-      }
-      store.set('player_stats', stats);
-      render('quests');
-    });
-  });
-}
-
-function renderQuestItem(title, current, target, key, reward) {
-  const stats = getPlayerStats();
-  const isDone = current >= target;
-  const claimed = key === 'quest_packs' ? stats.quests.openPacks.claimed : stats.quests.sellCards.claimed;
-  
-  return `
-    <div class="account-card" style="display:flex; justify-content:space-between; align-items:center; margin-top:0;">
-      <div>
-        <div style="font-weight:bold; font-size:15px; margin-bottom:4px;">${title}</div>
-        <div class="hint">Progress: ${Math.min(current, target)} / ${target} · Reward: +${reward.toLocaleString()} credits</div>
-      </div>
-      <div>
-        ${claimed ? '<span class="account-badge badge-free">Claimed</span>' : (isDone ? `<button class="btn btn-primary claim-quest-btn" data-quest="${key}" style="padding:8px 14px; font-size:13px;">Claim</button>` : '<span class="account-badge badge-guest">In Progress</span>')}
-      </div>
-    </div>
-  `;
-}
-
-function awardQuestReward(amount) {
-  if(guestMode) {
-    const gs = getGuestState();
-    gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) + amount;
-    setGuestState(gs);
-  } else if(profile) {
-    profile.credits = (profile.credits || 0) + amount;
-    sb.from('profiles').update({ credits: profile.credits }).eq('id', session.user.id).then();
-  }
-  SFX.coin();
-  toast(`Quest completed! +${amount.toLocaleString()} credits!`);
-}
-
-/* ============================================================
-   Gamification: Card Fusion Forge
-   ============================================================ */
-async function renderForge() {
-  const map = getCollectionsMap();
-  const activeName = getActiveCollectionName();
-  const coll = map[activeName] || {};
-  const cardKeys = Object.keys(coll).filter(id => classify(coll[id].rarity).id <= 1); // Commons & Uncommons
-
-  const wrap = el('div');
-  wrap.innerHTML = `
-    <div class="section-title">🔥 Card Fusion Forge</div>
-    <div class="account-card" style="margin-bottom:16px;">
-      <h3 style="margin-top:0; color:var(--gold);">Recycle Duplicate Cards</h3>
-      <p class="hint">Sacrifice 5 Common or Uncommon cards from your active binder to forge a guaranteed Rare or higher hit!</p>
-    </div>
-
-    <div class="account-card" style="display:flex; flex-direction:column; gap:12px;">
-      <h4 style="margin-top:0;">Available Common/Uncommon Cards (Total: ${cardKeys.length})</h4>
-      ${cardKeys.length < 5 ? '<div class="hint" style="color:var(--danger);">You need at least 5 Common or Uncommon cards in your active binder to use the Forge.</div>' : `
-        <select id="forge-card-select" style="width:100%; padding:12px 14px; border-radius:12px; background:var(--panel); color:var(--text); border:1px solid var(--edge);">
-          ${cardKeys.map(id => `<option value="${id}">${coll[id].name} (${coll[id].rarity}) [Available: ${coll[id].count}]</option>`).join('')}
-        </select>
-        <div style="display:flex; align-items:center; gap:8px;">
-           <label class="hint" style="font-weight:bold;">Quantity to Sacrifice (Requires 5):</label>
-        </div>
-        <button class="btn btn-primary" id="execute-forge-btn" style="width:100%; background:linear-gradient(135deg, #f59e0b, #ef4444);">🔥 Ignite Forge (Sacrifice 5)</button>
-      `}
-    </div>
-  `;
-  app.appendChild(wrap);
-
-  if(cardKeys.length >= 5) {
-    $('#execute-forge-btn', wrap).addEventListener('click', async () => {
-      const selectedId = $('#forge-card-select', wrap).value;
-      const cardObj = coll[selectedId];
-      if(!cardObj || cardObj.count < 5) {
-        toast('You need at least 5 copies of this specific card to sacrifice.');
-        return;
-      }
-
-      cardObj.count -= 5;
-      if(cardObj.count <= 0) delete coll[selectedId];
-      map[activeName] = coll;
-      store.set('user_collections', map);
-
-      // Generate a reward hit (Rare or higher)
-      const allSets = await getSets();
-      const randomSet = allSets[Math.floor(Math.random() * allSets.length)];
-      const setCards = await getCardsForSet(randomSet.id);
-      const hitsPool = setCards.filter(c => classify(c.rarity).id >= 2);
-      const forgedCard = hitsPool.length ? hitsPool[Math.floor(Math.random() * hitsPool.length)] : setCards[0];
-
-      persistToActiveCollection([{ card: forgedCard, foil: true }]);
-      SFX.chase();
-      burstConfetti(80);
-      toast(`Forge Success! Forged ${forgedCard.name} (${forgedCard.rarity})!`);
-      render('forge');
-    });
-  }
-}
-
 async function renderSearch() {
   const wrap = el('div');
   wrap.innerHTML = `
@@ -1465,7 +1324,6 @@ async function renderSetDetail(setMeta){
   setDetailCardsCache = null; setDetailCardsCacheSetId = null;
   const wrap = el('div');
   const dynamicCost = setMeta.packCost || 150;
-  const boxCost = dynamicCost * 30; // 36 packs discounted
   
   wrap.innerHTML = `
     <div class="pack-hero">
@@ -1485,7 +1343,6 @@ async function renderSetDetail(setMeta){
       <div class="pack-count">10 cards per pack · ${setMeta.total} cards in ${setMeta.name}</div>
       <div style="display:flex; gap:8px; width:100%;">
         <button class="btn btn-primary" id="open-pack-btn" style="flex:1;">${isAdminUser() ? 'Open Pack (Admin)' : `Open Pack — ${dynamicCost} cr`}</button>
-        <button class="btn btn-secondary" id="open-box-btn" style="flex:1; border-color:var(--gold); color:var(--gold);">📦 Box (36P) — ${boxCost} cr</button>
       </div>
       <div class="odds-box">
         <div class="row"><span>Structure</span><b>4 common · 3 uncommon · 1 reverse holo · 2 hit slots</b></div>
@@ -1496,7 +1353,6 @@ async function renderSetDetail(setMeta){
   `;
   app.appendChild(wrap);
   $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta, dynamicCost));
-  $('#open-box-btn').addEventListener('click', ()=> beginBoosterBox(setMeta, boxCost));
   
   if(setMeta.images.logo){
     ImgCache.get(setMeta.images.logo).then(src => {
@@ -1617,15 +1473,9 @@ async function beginOpen(setMeta, packCost){
     updatePlayerStats(st => {
       st.packsOpened = (st.packsOpened || 0) + 1;
       st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : packCost);
-      if(st.quests.openPacks.current < st.quests.openPacks.target) {
-        st.quests.openPacks.current++;
-      }
       
       pack.cards.forEach(p => {
         const tId = classify(p.card.rarity).id;
-        if(tId >= 4 && st.quests.pullHit.current < st.quests.pullHit.target) {
-          st.quests.pullHit.current++;
-        }
         if(tId > (st.rarestPull.tierId ?? -1)) {
           st.rarestPull = {
             name: p.card.name,
@@ -1669,273 +1519,6 @@ async function beginOpen(setMeta, packCost){
       btn.textContent = isAdminUser() ? 'Open Pack (Admin)' : `Open Pack — ${packCost} cr`; 
     } 
   }
-}
-
-async function beginBoosterBox(setMeta, boxCost) {
-  if(!session && !guestMode) { openAuthModal(setMeta); return; }
-  if(!isAdminUser() && currentCredits() < boxCost) { return openGetCreditsModal(true); }
-  
-  if(isAdminUser()) {
-    // Admin free
-  } else if(guestMode) {
-    const gs = getGuestState();
-    gs.credits -= boxCost;
-    setGuestState(gs);
-    $('#credit-count').textContent = gs.credits;
-  } else {
-    const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: boxCost });
-    if(error) throw error;
-    profile.credits = newBalance;
-    $('#credit-count').textContent = newBalance;
-  }
-
-  const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
-  
-  const allBoxPacks = [];
-  for(let i=0; i<36; i++) {
-    allBoxPacks.push(generatePack(cards));
-  }
-
-  updatePlayerStats(st => {
-    st.packsOpened = (st.packsOpened || 0) + 36;
-    st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : boxCost);
-  });
-
-  openBoosterBoxTray(setMeta, allBoxPacks);
-}
-
-function openBoosterBoxTray(setMeta, allPacks) {
-  const overlay = el('div', 'overlay');
-  overlay.style.zIndex = '400';
-  overlay.style.background = 'rgba(15, 23, 42, 0.96)';
-  overlay.style.display = 'flex';
-  overlay.style.flexDirection = 'column';
-  overlay.style.alignItems = 'center';
-  overlay.style.justifyContent = 'center';
-  overlay.style.padding = '16px';
-
-  let openedCount = allPacks.filter(p => p.opened).length;
-  const totalPacks = allPacks.length;
-
-  function renderTrayHTML() {
-    openedCount = allPacks.filter(p => p.opened).length;
-    overlay.innerHTML = `
-      <div style="width:100%; max-width:500px; display:flex; flex-direction:column; align-items:center; max-height:90vh;">
-        <div style="display:flex; justify-content:space-between; width:100%; align-items:center; margin-bottom:12px;">
-          <div>
-            <div style="font-size:18px; font-weight:bold; color:var(--gold); font-family:var(--font-display);">📦 ${setMeta.name} Booster Box</div>
-            <div class="hint">Opened: <span id="opened-counter">${openedCount}</span> / ${totalPacks} Packs</div>
-          </div>
-          <button class="btn btn-secondary" id="close-box-tray" style="padding:6px 12px; font-size:12px;">✕ Close Tray</button>
-        </div>
-
-        <div style="width:100%; overflow-y:auto; max-height:60vh; padding:8px; background:var(--panel-2); border:1px solid var(--edge); border-radius:14px; display:grid; grid-template-columns:repeat(6, 1fr); gap:8px;" id="box-packs-grid">
-           ${allPacks.map((pk, idx) => `
-             <div class="box-pack-slot ${pk.opened ? 'opened' : ''}" data-idx="${idx}" style="aspect-ratio:3/4; background: ${pk.opened ? 'var(--panel)' : 'linear-gradient(135deg, #3b82f6, #1e293b)'}; border:2px solid ${pk.opened ? 'var(--edge)' : 'var(--cyan)'}; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; position:relative; overflow:hidden; box-shadow:0 4px 10px rgba(0,0,0,0.4); transition: transform 0.2s;">
-               ${pk.opened ? `<span style="font-size:12px; color:var(--cyan); font-weight:bold;">✓</span>` : `<span style="font-size:10px; color:#fff; font-weight:bold; text-align:center; padding:2px;">#${idx+1}</span>`}
-             </div>
-           `).join('')}
-        </div>
-
-        <div style="display:flex; gap:10px; margin-top:16px; width:100%;">
-          <button class="btn btn-primary" id="open-next-box-pack" style="flex:1; padding:12px; font-weight:bold;">⚡ Open Next Pack</button>
-          <button class="btn btn-secondary" id="finish-box-btn" style="padding:12px;">View Box Summary</button>
-        </div>
-      </div>
-    `;
-
-    $('#close-box-tray', overlay).addEventListener('click', () => {
-      overlay.remove();
-      render('home');
-    });
-
-    $('#finish-box-btn', overlay).addEventListener('click', () => {
-      overlay.remove();
-      showBoxSummary(setMeta, allPacks);
-    });
-
-    $('#open-next-box-pack', overlay).addEventListener('click', () => {
-      const nextIdx = allPacks.findIndex(p => !p.opened);
-      if(nextIdx === -1) {
-        overlay.remove();
-        showBoxSummary(setMeta, allPacks);
-        return;
-      }
-      openBoxPackModal(setMeta, allPacks, nextIdx, () => {
-        renderTrayHTML();
-      });
-    });
-
-    overlay.querySelectorAll('.box-pack-slot').forEach(slot => {
-      slot.addEventListener('click', () => {
-        const idx = parseInt(slot.dataset.idx);
-        if(allPacks[idx].opened) {
-          toast('This pack has already been opened!');
-          return;
-        }
-        openBoxPackModal(setMeta, allPacks, idx, () => {
-          renderTrayHTML();
-        });
-      });
-    });
-  }
-
-  renderTrayHTML();
-  document.body.appendChild(overlay);
-}
-
-function openBoxPackModal(setMeta, allPacks, packIdx, onClosed) {
-  const pack = allPacks[packIdx];
-  const screen = el('div','reveal-screen');
-  screen.style.zIndex = '500';
-  let idx = 0; let bestTier = 0;
-  
-  screen.innerHTML = `
-    <div class="reveal-header">
-      <div class="reveal-progress" id="prog">Card 1 / ${pack.cards.length}</div>
-      <button class="close-x" id="close-box-pack">✕</button>
-    </div>
-    <div class="stage"><div class="flipcard" id="flipcard">
-      <div class="face back"></div>
-      <div class="face front"><img id="front-img" src="" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" alt=""/><div class="foil-layer" id="foil"></div><div class="tier-badge" id="tier-badge"></div></div>
-    </div></div>
-    <div class="card-name" id="card-name">&nbsp;</div>
-    <div class="card-sub" id="card-sub">&nbsp;</div>
-    <div id="buy-slot"></div>
-    <div class="dots" id="dots"></div>
-    <div class="tap-hint" id="tap-hint">Tap the card to flip it</div>
-  `;
-  const flashLayer = el('div','flash-layer'); document.body.appendChild(flashLayer);
-
-  const intro = el('div','pack-intro');
-  let authenticPackBg = setMeta.resolvedPackArt ? `url('${ImgCache.sync(setMeta.resolvedPackArt)}')` : '';
-  
-  intro.innerHTML = `
-    <div class="pack-art ${setMeta.resolvedPackArt ? '' : 'is-fallback'}" id="rip-wrapper" style="margin:0; cursor:grab; touch-action:none;">
-      <div class="pack-art-bg" style="${authenticPackBg ? `background-image:${authenticPackBg}; background-size: 100% 100%;` : 'background:linear-gradient(135deg, #1e293b, #0f172a);'}"></div>
-      <div class="pack-crimp top fallback-only"></div>
-      <div class="pack-crimp bottom fallback-only"></div>
-      <img class="pack-art-logo fallback-only" src="${ImgCache.sync(setMeta.images.logo)}" onerror="this.style.display='none'"/>
-      <div style="position:absolute; bottom:15px; width:100%; text-align:center; font-weight:bold; color:#fff; font-size:13px; text-shadow:0 2px 4px rgba(0,0,0,0.8);">👆 Pack #${packIdx+1} — Swipe or Tap to Rip!</div>
-    </div>
-  `;
-  
-  document.body.appendChild(intro);
-
-  let startY = 0;
-  const ripEl = intro.querySelector('#rip-wrapper');
-  
-  function triggerRip() {
-    SFX.tear();
-    vibrate([15,30,15]);
-    ripEl.style.animation = 'packrip 0.4s ease-out forwards';
-    setTimeout(()=>{
-      intro.remove(); document.body.appendChild(screen); boot();
-    }, 380);
-  }
-
-  ripEl.addEventListener('pointerdown', (e) => { startY = e.clientY; });
-  ripEl.addEventListener('pointerup', (e) => { triggerRip(); });
-
-  function finishPackOpening() {
-    pack.opened = true;
-    persistToActiveCollection(pack.cards);
-    screen.remove();
-    flashLayer.remove();
-    onClosed();
-  }
-
-  function boot(){
-    const dotsWrap = $('#dots', screen);
-    pack.cards.forEach(()=> dotsWrap.appendChild(el('span')));
-    $('#close-box-pack', screen).addEventListener('click', finishPackOpening);
-
-    function showCard(i){
-      const p = pack.cards[i]; const tier = classify(p.card.rarity);
-      bestTier = Math.max(bestTier, tier.id);
-      $('#prog', screen).textContent = `Card ${i+1} / ${pack.cards.length}`;
-      $('#front-img', screen).src = ImgCache.sync(p.card.images.large || p.card.images.small);
-      
-      $('#card-name', screen).innerHTML = '&nbsp;';
-      $('#card-sub', screen).innerHTML = '&nbsp;';
-      
-      const badge = $('#tier-badge', screen); badge.textContent = tier.label; badge.style.background = tier.color;
-      $('#buy-slot', screen).innerHTML = '';
-      const flip = $('#flipcard', screen); flip.classList.remove('flipped','rare-fx');
-      if(tier.id >= 3) flip.classList.add('rare-fx');
-      $('#tap-hint', screen).textContent = 'Tap the card to flip it';
-      flip.dataset.done = '0';
-    }
-    function markDot(i, tier){
-      const dot = dotsWrap.children[i]; dot.classList.add('done'); if(tier>=4) dot.classList.add('hit');
-    }
-    showCard(0);
-
-    $('#flipcard', screen).addEventListener('click', function(){
-      if(this.dataset.done==='1'){
-        idx++;
-        if(idx >= pack.cards.length){ finishPackOpening(); return; }
-        this.classList.remove('flipped'); this.dataset.done='0';
-        setTimeout(()=>showCard(idx), 180);
-        return;
-      }
-      this.classList.add('flipped'); this.dataset.done='1';
-      const cardObj = pack.cards[idx].card;
-      const tier = classify(cardObj.rarity);
-      markDot(idx, tier.id);
-      SFX.flip();
-      setTimeout(()=>{
-        $('#card-name', screen).textContent = cardObj.name;
-        $('#card-sub', screen).textContent = `${cardObj.rarity || 'Common'}${pack.cards[idx].foil ? ' · Foil' : ''} — ${cardObj.set?.name || setMeta.name}`;
-        $('#buy-slot', screen).innerHTML = buyLink(cardObj);
-        if(tier.id>=7){
-          SFX.chase(); vibrate([30,60,30,60,80]); burstConfetti(90);
-        } else if(tier.id>=4){ SFX.hit(); vibrate([20,40,20]); burstConfetti(45); }
-      }, 250);
-      $('#tap-hint', screen).textContent = idx < pack.cards.length-1 ? 'Tap to reveal the next card' : 'Tap to return to box tray';
-    });
-  }
-}
-
-function showBoxSummary(setMeta, allPacks) {
-  const overlay = el('div', 'overlay');
-  const sheet = el('div', 'sheet');
-  
-  const allCardsFlat = [];
-  allPacks.forEach(p => p.cards.forEach(c => allCardsFlat.push(c)));
-  const topHits = allCardsFlat.filter(p => classify(p.card.rarity).id >= 4);
-  topHits.sort((a,b) => classify(b.card.rarity).id - classify(a.card.rarity).id);
-
-  sheet.innerHTML = `
-    <div class="sheet-handle"></div>
-    <h2>📦 Booster Box Summary</h2>
-    <div class="sub">Completed ${setMeta.name} Booster Box! Total cards added to binders.</div>
-    <div style="font-weight:bold; color:var(--cyan); margin:12px 0 6px;">Top Hits (${topHits.length} Ultra/Secret Rares):</div>
-    <div class="summary-grid" id="box-sum-grid"></div>
-    <button class="btn btn-primary" style="width:100%; margin-top:18px;" id="box-sum-close">Done</button>
-  `;
-  overlay.appendChild(sheet);
-  document.body.appendChild(overlay);
-
-  const grid = $('#box-sum-grid', sheet);
-  if(topHits.length === 0) {
-    grid.innerHTML = '<div class="hint">No ultra-rare hits pulled in this box. Better luck next time!</div>';
-  } else {
-    topHits.slice(0, 12).forEach(p => {
-      const mini = el('div', 'mini hit');
-      mini.innerHTML = `<img src="${ImgCache.sync(p.card.images.small)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'80\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'"/>`;
-      mini.addEventListener('click', () => showCardFullscreen(ImgCache.sync(p.card.images.large || p.card.images.small), p.card));
-      grid.appendChild(mini);
-    });
-  }
-
-  burstConfetti(120);
-  SFX.chase();
-
-  $('#box-sum-close', sheet).addEventListener('click', () => {
-    overlay.remove();
-    render('collection');
-  });
 }
 
 function openRevealScreen(setMeta, pack, bgUrl){
