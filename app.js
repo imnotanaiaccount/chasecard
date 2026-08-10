@@ -1,25 +1,25 @@
 /* ============================================================
    CONFIG — fill these in with your own project values.
+   No real-money purchase paths exist in this app. Premium/VIP
+   status is admin-granted only (see admin panel) and carries no
+   price — it's a cosmetic status, not something users can buy.
    ============================================================ */
 const CONFIG = {
   SUPABASE_URL: 'https://mdtpdqwxegmseidxnnvb.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kdHBkcXd4ZWdtc2VpZHhubnZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMTEzMzEsImV4cCI6MjEwMTg4NzMzMX0.ZWkYKmt6N7-0jqwEMB4Zn9H1BDUvGPZb1EsEAS7VRBI',
   APP_URL: window.location.origin + '/',
-  CHECKOUT_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-checkout-session',
-  SUBSCRIBE_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-subscription-checkout',
-  BILLING_PORTAL_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-billing-portal-session',
-  
+
   ECONOMY: {
     STARTING_CREDITS: 2250,
     GUEST_CREDITS: 2250,
     REFERRAL_BONUS: 25000,
     PREMIUM_TIERS: [
-      { key:'free',    label:'Free',    price:'$0/mo',    creditDesc:'0 credits'              },
-      { key:'starter', label:'Starter', price:'$3.49/mo', creditDesc:'35,000 credits/mo upfront' },
-      { key:'plus',    label:'Plus',    price:'$6.99/mo', creditDesc:'100,000 credits/mo upfront' },
-      { key:'pro',     label:'Pro',     price:'$13.99/mo',creditDesc:'200,000 credits/mo upfront' },
-      { key:'elite',   label:'Elite',   price:'$24.49/mo',creditDesc:'335,000 credits/mo upfront' },
-      { key:'vip',     label:'VIP',     price:'$99.99/mo',creditDesc:'100,000 credits/day (Daily Drip)' },
+      { key:'free',    label:'Free' },
+      { key:'starter', label:'Starter' },
+      { key:'plus',    label:'Plus' },
+      { key:'pro',     label:'Pro' },
+      { key:'elite',   label:'Elite' },
+      { key:'vip',     label:'VIP' },
     ],
   },
 };
@@ -249,10 +249,7 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
 };
 
-function buyLink(card){
-  const q = encodeURIComponent(`${card.name} ${card.set?.name || ''}`.trim());
-  return `<a class="buy-card-btn" href="https://www.tcgplayer.com/search/pokemon/product?q=${q}" target="_blank" rel="noopener sponsored">🛒 Buy this card</a>`;
-}
+
 
 /* ============================================================
    Player Statistics Store
@@ -330,7 +327,6 @@ function showCardFullscreen(imgSrc, cardObj){
           <img src="${imgSrc}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" style="width:100%; border-radius:18px; box-shadow:0 30px 60px rgba(0,0,0,0.8); animation: zoomIn 0.3s cubic-bezier(0.2,0.8,0.2,1); object-fit:contain; max-height:70vh;"/>
           ${cardObj ? `
             <div style="text-align:center; margin-top:16px; display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; animation: slideup 0.3s ease;">
-                ${buyLink(cardObj)}
                 <button class="btn btn-secondary" id="sell-card-btn" style="background:var(--danger); border-color:var(--danger); color:#fff; padding:10px 16px; font-size:13px;">Sell for ${sellCredits} Credits (70%)</button>
             </div>
             <div class="hint" style="font-size:10px; margin-top:6px; color:var(--dim); text-align:center;">Virtual currency only. No real-world cash value.</div>
@@ -1027,7 +1023,7 @@ function renderAccountArea(user, userProfile) {
       </div>
       <div class="account-details">
         <p><strong>Credits:</strong> ${userProfile?.is_admin ? '∞ (Admin Unlimited)' : (userProfile?.credits?.toLocaleString() || CONFIG.ECONOMY.STARTING_CREDITS)}</p>
-        <p><strong>Status:</strong> ${userProfile?.is_premium ? 'Active Subscription' : 'Standard'}</p>
+        <p><strong>Status:</strong> ${userProfile?.is_premium ? 'Premium (Admin-Granted)' : 'Standard'}</p>
         <p><strong>🔥 Daily Streak:</strong> ${stats.loginStreak || 1} Days Active</p>
       </div>
     </div>
@@ -1661,7 +1657,6 @@ function openRevealScreen(setMeta, pack, bgUrl){
       setTimeout(()=>{
         $('#card-name', screen).textContent = cardObj.name;
         $('#card-sub', screen).textContent = `${cardObj.rarity || 'Common'}${pack.cards[idx].foil ? ' · Foil' : ''} — ${cardObj.set?.name || setMeta.name}`;
-        $('#buy-slot', screen).innerHTML = buyLink(cardObj);
         if(tier.id>=7){
           SFX.chase(); vibrate([30,60,30,60,80]); burstConfetti(90);
           screen.classList.add('shake'); setTimeout(()=>screen.classList.remove('shake'), 500);
@@ -1906,7 +1901,7 @@ function renderTrade(){
 
 const SHARE_BONUS = 5000;
 const SHARE_PLATFORMS = [
-  { id:'x', label:'X', icon:'𝕏' },
+  { id:'x', label:'X (Twitter)', icon:'' },
   { id:'instagram', label:'Instagram', icon:'📸' },
   { id:'facebook', label:'Facebook', icon:'📘' },
   { id:'tiktok', label:'TikTok', icon:'🎵' },
@@ -2027,23 +2022,12 @@ function openGetCreditsModal(lowBalance=false){
     </div>
     <div class="hint" style="margin-bottom:18px;">You both get +${refBonus.toLocaleString()} credits when they sign up.${profile?.is_premium ? ' (2× Premium bonus applied)' : ''}</div>
     ${shareSectionHTML()}
-    <div class="section-title" style="margin-top:0;">Membership Tiers</div>
-    ${CONFIG.ECONOMY.PREMIUM_TIERS.map(t=>`
-      <div class="bundle${t.key==='vip' ? ' vip-bundle' : ''}">
-        <div>
-          <div class="amt"${t.key==='vip' ? ' style="color:var(--vip-gold);"' : ''}>${t.key==='vip' ? '👑 ' : ''}${t.label}</div>
-          <p class="sub">${t.creditDesc} · ${t.price}</p>
-        </div>
-        ${t.key !== 'free' && (!profile || profile.premium_tier !== t.key) ? `<button class="btn ${t.key==='vip' ? 'btn-vip' : 'btn-gold'}" data-tier="${t.key}">Subscribe</button>` : ''}
-      </div>
-    `).join('')}
     ${profile?.is_premium ? `
     <div class="bundle" style="flex-direction:column;align-items:stretch;gap:8px; margin-top:12px;">
       <div>
-        <div class="amt"${currentTier?.key==='vip' ? ' style="color:var(--vip-gold);"' : ' style="color:var(--gold);"'}>${currentTier?.key==='vip' ? '👑 ' : ''}${currentTier?.label || 'Premium'} active</div>
-        <p class="sub">Manage or cancel your subscription anytime.</p>
+        <div class="amt"${currentTier?.key==='vip' ? ' style="color:var(--vip-gold);"' : ' style="color:var(--gold);"'}>${currentTier?.key==='vip' ? '👑 ' : ''}${currentTier?.label || 'Premium'} status</div>
+        <p class="sub">Granted by the site admin.</p>
       </div>
-      <button class="btn btn-secondary" id="manage-billing-btn">Manage subscription</button>
     </div>` : ''}
   `;
   overlay.appendChild(sheet); document.body.appendChild(overlay);
@@ -2054,63 +2038,6 @@ function openGetCreditsModal(lowBalance=false){
   $('#copy-ref', sheet).addEventListener('click', ()=>{
     navigator.clipboard?.writeText(refLink); SFX.coin(); toast('Referral link copied');
   });
-  sheet.querySelectorAll('[data-tier]').forEach(btn=>{
-    btn.addEventListener('click', ()=> startSubscriptionCheckout(btn.dataset.tier, btn));
-  });
-  $('#manage-billing-btn', sheet)?.addEventListener('click', async (e)=>{
-    const btn = e.target; const original = btn.textContent; btn.disabled = true; btn.textContent = '…';
-    try{
-      const res = await fetch(CONFIG.BILLING_PORTAL_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      });
-      if(!res.ok) throw new Error('portal_failed');
-      const { url } = await res.json();
-      if(!url) throw new Error('portal_failed');
-      location.href = url;
-    }catch(e){ btn.disabled=false; btn.textContent=original; toast('Billing portal not set up yet'); }
-  });
-}
-
-async function startSubscriptionCheckout(tierKey, btn){
-  const original = btn.textContent;
-  btn.disabled = true; btn.textContent = '…';
-  try{
-    const res = await fetch(CONFIG.SUBSCRIBE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify({ tier: tierKey }),
-    });
-    if(!res.ok) throw new Error('checkout_failed');
-    const { url } = await res.json();
-    if(!url) throw new Error('checkout_failed');
-    location.href = url;
-  }catch(e){
-    btn.disabled = false; btn.textContent = original;
-    toast('Subscriptions aren\'t live yet — coming soon');
-  }
-}
-
-async function startCheckout(bundleKey, btn){
-  const original = btn.textContent;
-  btn.disabled = true; btn.textContent = '…';
-  try{
-    const res = await fetch(CONFIG.CHECKOUT_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ bundle: bundleKey }),
-    });
-    if(!res.ok) throw new Error('checkout_failed');
-    const { url } = await res.json();
-    if(!url) throw new Error('checkout_failed');
-    location.href = url; 
-  }catch(e){
-    btn.disabled = false; btn.textContent = original;
-    toast('Could not start checkout — try again');
-  }
 }
 
 /* ============================================================
