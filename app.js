@@ -10,16 +10,16 @@ const CONFIG = {
   BILLING_PORTAL_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-billing-portal-session',
   
   ECONOMY: {
-    STARTING_CREDITS: 500,
+    STARTING_CREDITS: 2250,
     GUEST_CREDITS: 2250, // Fair starting credit amount for guest sessions (450 * 5)
-    REFERRAL_BONUS: 250,
+    REFERRAL_BONUS: 10000,
     PREMIUM_TIERS: [
       { key:'free',    label:'Free',    price:'$0/mo',    dailyCredits:0      },
       { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
       { key:'plus',    label:'Plus',    price:'$6.99/mo', dailyCredits:10000 },
       { key:'pro',     label:'Pro',     price:'$13.99/mo', dailyCredits:20000 },
       { key:'elite',   label:'Elite',   price:'$24.49/mo', dailyCredits:33500 },
-      { key:'vip',     label:'VIP',     price:'$99.99/mo', unlimited:true    },
+      { key:'vip',     label:'VIP',     price:'$99.99/mo', dailyCredits:335000 }, // Elite max daily (33,500) * 10 = 335,000 credits/day
     ],
   },
 };
@@ -206,7 +206,7 @@ function showCardFullscreen(imgSrc, cardObj){
   
   overlay.innerHTML = `
       <div style="position:relative; width:90%; max-width:400px; perspective:1200px; display:flex; flex-direction:column; align-items:center;">
-          <img src="${imgSrc}" style="width:100%; border-radius:18px; box-shadow:0 30px 60px rgba(0,0,0,0.8); animation: zoomIn 0.3s cubic-bezier(0.2,0.8,0.2,1); object-fit:contain; max-height:70vh;"/>
+          <img src="${imgSrc}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" style="width:100%; border-radius:18px; box-shadow:0 30px 60px rgba(0,0,0,0.8); animation: zoomIn 0.3s cubic-bezier(0.2,0.8,0.2,1); object-fit:contain; max-height:70vh;"/>
           ${cardObj ? `
             <div style="text-align:center; margin-top:16px; display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; animation: slideup 0.3s ease;">
                 ${buyLink(cardObj)}
@@ -264,7 +264,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
 }
 
 /* ============================================================
-   Image Caching System (Everything/Every Image Cached)
+   Image Caching System (Everything/Every Image Cached with Robust Fallbacks)
    ============================================================ */
 const ImgCache = {
   blobUrls: {},
@@ -275,7 +275,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('packpull-images-v2-comprehensive');
+        const cache = await caches.open('packpull-images-v3-comprehensive');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -295,10 +295,13 @@ const ImgCache = {
       hideLoader();
     }
     
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => { this.blobUrls[url] = url; resolve(url); };
-      img.onerror = () => reject(new Error('Image missing'));
+      img.onerror = () => {
+        this.blobUrls[url] = url;
+        resolve(url);
+      };
       img.src = url;
     });
   },
@@ -530,7 +533,15 @@ function startGuestSession(redirect=true){
   else render(route.name, route.params); 
 }
 function exitGuestMode(){ guestMode = false; openAuthModal(); }
-function currentCredits(){ return guestMode ? (getGuestState().credits ?? CONFIG.ECONOMY.GUEST_CREDITS) : (profile?.credits ?? 0); }
+
+function isAdminUser(){
+  return !!(profile?.is_admin);
+}
+
+function currentCredits(){ 
+  if (isAdminUser()) return '∞';
+  return guestMode ? (getGuestState().credits ?? CONFIG.ECONOMY.GUEST_CREDITS) : (profile?.credits ?? 0); 
+}
 
 async function initAuth(){
   const { data } = await sb.auth.getSession();
@@ -770,8 +781,8 @@ function renderTopbar(){
     : `<button class="topbar-auth" id="login-btn">Log In</button>`;
 
   bar.innerHTML = `
-    <div class="brand"><span class="dot"></span>PackPull${guestMode ? ' <span style="font-size:10px;color:var(--dim-2);font-weight:700;letter-spacing:.08em;background:var(--panel);border:1px solid var(--edge);padding:2px 7px;border-radius:999px;margin-left:6px;">GUEST</span>' : ''}${isVip() ? '<span class="vip-badge">👑 VIP</span>' : ''}${authBtn}</div>
-    <button class="credits-pill tappable" id="credits-btn"><span class="coin"></span><span id="credit-count">${isVip() ? '∞' : currentCredits()}</span></button>
+    <div class="brand"><span class="dot"></span>PackPull${guestMode ? ' <span style="font-size:10px;color:var(--dim-2);font-weight:700;letter-spacing:.08em;background:var(--panel);border:1px solid var(--edge);padding:2px 7px;border-radius:999px;margin-left:6px;">GUEST</span>' : ''}${isAdminUser() ? '<span class="vip-badge">🛠️ ADMIN</span>' : (profile?.premium_tier === 'vip' ? '<span class="vip-badge">👑 VIP</span>' : '')}${authBtn}</div>
+    <button class="credits-pill tappable" id="credits-btn"><span class="coin"></span><span id="credit-count">${currentCredits()}</span></button>
   `;
   
   if(session) {
@@ -811,11 +822,11 @@ function getAccountTypeBadge(user, userProfile) {
     return { label: 'Guest', cssClass: 'badge-guest' };
   }
   
-  if (profile?.is_admin) {
+  if (userProfile?.is_admin) {
       return { label: '🛠️ System Admin', cssClass: 'badge-vip' };
   }
   
-  const tier = (profile?.premium_tier || 'free').toLowerCase();
+  const tier = (userProfile?.premium_tier || 'free').toLowerCase();
 
   switch (tier) {
     case 'vip': return { label: '👑 VIP Member', cssClass: 'badge-vip' };
@@ -838,7 +849,7 @@ function renderAccountArea(user, userProfile) {
         <span class="account-badge ${badge.cssClass}">${badge.label}</span>
       </div>
       <div class="account-details">
-        <p><strong>Credits:</strong> ${userProfile?.credits?.toLocaleString() || 0}</p>
+        <p><strong>Credits:</strong> ${userProfile?.is_admin ? '∞ (Admin Unlimited)' : (userProfile?.credits?.toLocaleString() || 0)}</p>
         <p><strong>Status:</strong> ${userProfile?.is_premium ? 'Active Subscription' : 'Standard'}</p>
       </div>
     </div>
@@ -872,12 +883,16 @@ async function renderProfile() {
                  <option value="plus">Plus</option>
                  <option value="pro">Pro</option>
                  <option value="elite">Elite</option>
-                 <option value="vip">VIP Member</option>
+                 <option value="vip">VIP Member (335,000 daily credits)</option>
              </select>
          </div>
 
          <button class="btn btn-vip" id="admin-update-membership-btn" style="width:100%;">Update User Membership</button>
          <div id="admin-msg" class="hint" style="margin-top:12px; text-align:center; font-weight:bold; min-height:16px;"></div>
+      </div>
+
+      <div id="admin-debug-hint" class="hint" style="margin-top:20px; text-align:center; display:none; padding:12px; border:1px dashed var(--edge); border-radius:12px;">
+          💡 <strong>Admin Notice:</strong> If you don't see the admin controls above, ensure your account row in the Supabase database has <code style="color:var(--cyan);">is_admin = true</code>. Run: <code style="color:var(--cyan);">UPDATE profiles SET is_admin = true WHERE id = '${session?.user?.id || 'YOUR_USER_ID'}';</code> in your Supabase SQL editor.
       </div>
   `;
   app.appendChild(wrap);
@@ -899,17 +914,22 @@ async function renderProfile() {
   }
   
   setTimeout(async () => {
+    // Reload profile fresh to guarantee correct admin status check
+    if(session) await loadProfile();
     renderAccountArea(session?.user, profile);
+
+    const adminPanel = $('#admin-panel', wrap);
+    const debugHint = $('#admin-debug-hint', wrap);
+
     if (session && profile?.is_admin) {
-        const adminPanel = $('#admin-panel', wrap);
+        if (adminPanel) adminPanel.style.display = 'block';
+        if (debugHint) debugHint.style.display = 'none';
+
         const updateBtn = $('#admin-update-membership-btn', wrap);
         const userSelect = $('#admin-target-user-select', wrap);
         const tierSelect = $('#admin-target-tier-select', wrap);
         const msgBox = $('#admin-msg', wrap);
-        
-        if (adminPanel) adminPanel.style.display = 'block';
 
-        // Load registered users into the dropdown selector
         try {
             const { data: usersList, error: usersErr } = await sb.from('profiles').select('id, email, username, premium_tier').order('email', { ascending: true });
             if (usersErr) throw usersErr;
@@ -919,7 +939,7 @@ async function renderProfile() {
                 userSelect.innerHTML = '<option value="">No registered users found</option>';
             }
         } catch(e) {
-            userSelect.innerHTML = '<option value="">Error loading users list</option>';
+            userSelect.innerHTML = '<option value="">Error loading users list (Check RLS policies on profiles table)</option>';
         }
         
         if (updateBtn) {
@@ -938,7 +958,6 @@ async function renderProfile() {
                     msgBox.style.color = 'var(--cyan)';
                     msgBox.textContent = `Success! User membership updated to ${newTier.toUpperCase()}.`;
                     
-                    // Refresh user dropdown list to show updated tier
                     const { data: refreshedList } = await sb.from('profiles').select('id, email, username, premium_tier').order('email', { ascending: true });
                     if (refreshedList) {
                         userSelect.innerHTML = refreshedList.map(u => `<option value="${u.email || u.id}" ${u.email === targetIdentifier ? 'selected' : ''}>${u.email || u.username || u.id} (Current: ${u.premium_tier || 'free'})</option>`).join('');
@@ -950,6 +969,9 @@ async function renderProfile() {
                 updateBtn.disabled = false; updateBtn.textContent = 'Update User Membership';
             });
         }
+    } else {
+        if (adminPanel) adminPanel.style.display = 'none';
+        if (debugHint && session) debugHint.style.display = 'block';
     }
   }, 0);
 }
@@ -983,7 +1005,7 @@ async function renderSearch() {
            const card = el('div', 'refer-box'); 
            card.style.display = 'flex'; card.style.alignItems = 'center'; card.style.cursor = 'pointer';
            card.innerHTML = `
-              <img src="${item.card_image || ''}" style="width:44px; height:62px; object-fit:cover; border-radius:4px; margin-right:12px;" />
+              <img src="${item.card_image || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'44\' height=\'62\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'" style="width:44px; height:62px; object-fit:cover; border-radius:4px; margin-right:12px;" />
               <div style="flex:1;">
                  <div style="font-weight:bold; font-size:14px; margin-bottom:2px;">${item.card_name}</div>
                  <div class="hint" style="color:var(--dim);">Pulled by: ${item.username || 'User'}</div>
@@ -1032,7 +1054,7 @@ async function renderUserCollection(targetUserId, username) {
         grid.innerHTML = '';
         keys.sort((a,b)=> classify(coll[b].rarity).id - classify(coll[a].rarity).id).forEach(id=>{
           const c = coll[id]; const item = el('div','coll-item');
-          item.innerHTML = `<img src="${c.image}"/><span class="count">×${c.count}</span>`;
+          item.innerHTML = `<img src="${c.image}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'140\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'"/><span class="count">×${c.count}</span>`;
           item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), { id, ...c }));
           grid.appendChild(item);
         });
@@ -1075,24 +1097,12 @@ async function renderUserCollection(targetUserId, username) {
 
 function renderPremiumBanner(claimedToday){
   const tier = CONFIG.ECONOMY.PREMIUM_TIERS.find(t=>t.key===profile?.premium_tier);
-  if(tier?.unlimited){
-    const box = el('div');
-    box.className = 'vip-banner';
-    box.innerHTML = `
-      <div class="vip-shimmer"></div>
-      <div style="position:relative;">
-        <div style="font-family:var(--font-display);font-weight:800;font-size:15px;color:var(--vip-gold);letter-spacing:0.5px;">👑 VIP MEMBER</div>
-        <div style="font-size:12.5px;color:var(--vip-gold-dim);">Unlimited packs — always. Welcome back.</div>
-      </div>
-    `;
-    return box;
-  }
   const dailyAmt = tier?.dailyCredits || 0;
   const box = el('div');
   box.style.cssText = 'background:linear-gradient(135deg,rgba(240,185,77,0.14),rgba(240,185,77,0.04)); border:1px solid var(--gold); border-radius:14px; padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px;';
   box.innerHTML = `
     <div>
-      <div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--gold);">${tier?.label || 'Premium'}</div>
+      <div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--gold);">${tier?.label || 'Premium'} Tier</div>
       <div style="font-size:12.5px;color:var(--dim);">${claimedToday ? 'Come back tomorrow for more credits' : `${dailyAmt.toLocaleString()} credits ready to claim`}</div>
     </div>
     <button class="btn btn-gold" id="claim-daily-btn" ${claimedToday?'disabled':''}>${claimedToday ? 'Claimed ✓' : 'Claim'}</button>
@@ -1105,7 +1115,7 @@ function renderPremiumBanner(claimedToday){
         const { data, error } = await sb.rpc('claim_daily_credits');
         if(error) throw error;
         profile.credits = data; profile.last_daily_grant = new Date().toISOString().slice(0,10);
-        $('#credit-count').textContent = data;
+        $('#credit-count').textContent = isAdminUser() ? '∞' : data;
         btn.textContent = 'Claimed ✓'; SFX.coin(); toast(`+${dailyAmt.toLocaleString()} credits`);
       }catch(e){ btn.disabled=false; btn.textContent='Claim'; toast('Already claimed today'); }
     });
@@ -1137,10 +1147,15 @@ async function renderHome(){
     sets.forEach(s=>{
       const card = el('div','set-card');
       const costDisplay = s.packCost || 150;
-      card.innerHTML = `<img src="" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
+      card.innerHTML = `<img src="" onerror="this.style.display='none'" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
       card.addEventListener('click', ()=> render('set', { set: s }));
       grid.appendChild(card);
-      ImgCache.get(s.images.symbol).then(src => card.querySelector('img').src = src);
+      if(s.images.symbol) {
+        ImgCache.get(s.images.symbol).then(src => {
+          const imgEl = card.querySelector('img');
+          if(imgEl) imgEl.src = src;
+        });
+      }
     });
   }catch(e){
     const msg = 'Couldn\'t reach the card database — it can be flaky. Nothing was charged.';
@@ -1157,7 +1172,7 @@ async function renderSetDetail(setMeta){
   
   wrap.innerHTML = `
     <div class="pack-hero">
-      <img class="logo" id="hero-logo" src="" alt=""/>
+      <img class="logo" id="hero-logo" src="" onerror="this.style.display='none'" alt=""/>
       
       <div id="pack-gallery-wrap" style="width: 100%; display: flex; flex-direction: column; align-items: center;">
           <div class="pack-gallery single" id="pack-gallery">
@@ -1165,13 +1180,13 @@ async function renderSetDetail(setMeta){
               <div class="pack-art-bg skeleton"></div>
               <div class="pack-crimp top fallback-only"></div>
               <div class="pack-crimp bottom fallback-only"></div>
-              <img class="pack-art-logo fallback-only" id="pack-art-logo" src=""/>
+              <img class="pack-art-logo fallback-only" id="pack-art-logo" src="" onerror="this.style.display='none'"/>
             </div>
           </div>
       </div>
 
       <div class="pack-count">10 cards per pack · ${setMeta.total} cards in ${setMeta.name}</div>
-      <button class="btn btn-primary" id="open-pack-btn" style="width:100%;">${isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${dynamicCost} credits`}</button>
+      <button class="btn btn-primary" id="open-pack-btn" style="width:100%;">${isAdminUser() ? 'Open pack — Unlimited (Admin)' : `Open pack — ${dynamicCost} credits`}</button>
       <div class="odds-box">
         <div class="row"><span>Structure</span><b>4 common · 3 uncommon · 1 reverse holo · 2 hit slots</b></div>
         <div class="row"><span>Hit-slot odds</span><b>modeled on SV-era community data</b></div>
@@ -1182,11 +1197,14 @@ async function renderSetDetail(setMeta){
   app.appendChild(wrap);
   $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta, dynamicCost));
   
-  ImgCache.get(setMeta.images.logo).then(src => {
-    $('#hero-logo').src = src; 
-    const fal = $('#pack-art-logo', wrap);
-    if(fal) fal.src = src;
-  });
+  if(setMeta.images.logo){
+    ImgCache.get(setMeta.images.logo).then(src => {
+      const heroLogo = $('#hero-logo');
+      if(heroLogo) heroLogo.src = src; 
+      const fal = $('#pack-art-logo', wrap);
+      if(fal) fal.src = src;
+    });
+  }
 
   try{
     const cards = await getCardsForSet(setMeta.id);
@@ -1197,18 +1215,22 @@ async function renderSetDetail(setMeta){
     const tcgdexBase = setMeta.images.logo ? setMeta.images.logo.replace(/\/(logo|symbol)\.png$/, '') : '';
     
     let rawUrls = [];
-    try {
-      const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
-      const ghRes = await fetch(githubApiUrl);
-      if (ghRes.ok) {
-        const files = await ghRes.json();
-        const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
-        images.sort((a,b) => a.name.localeCompare(b.name));
-        rawUrls = images.map(img => img.download_url);
-      }
-    } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
+    const isPromoOrSpecial = idLower.includes('mcd') || idLower.includes('base') || idLower.includes('promo') || idLower.includes('det');
+    
+    if (!isPromoOrSpecial) {
+      try {
+        const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
+        const ghRes = await fetch(githubApiUrl);
+        if (ghRes.ok) {
+          const files = await ghRes.json();
+          const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
+          images.sort((a,b) => a.name.localeCompare(b.name));
+          rawUrls = images.map(img => img.download_url);
+        }
+      } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
+    }
 
-    if (rawUrls.length === 0) {
+    if (rawUrls.length === 0 && !isPromoOrSpecial) {
       rawUrls = [
         `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
         `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
@@ -1231,7 +1253,7 @@ async function renderSetDetail(setMeta){
 
     if (uniqueValidUrls.length === 0) {
         const pa = el('div', 'pack-art is-fallback active');
-        pa.innerHTML = `<div class="pack-art-bg"></div><div class="pack-crimp top fallback-only"></div><div class="pack-crimp bottom fallback-only"></div><img class="pack-art-logo fallback-only" id="pack-art-logo" src="${ImgCache.sync(setMeta.images.logo)}"/>`;
+        pa.innerHTML = `<div class="pack-art-bg" style="background: linear-gradient(135deg, #1e293b, #0f172a); display:flex; align-items:center; justify-content:center; text-align:center; padding:12px; font-weight:bold; color:var(--cyan);">${setMeta.name}</div><div class="pack-crimp top fallback-only"></div><div class="pack-crimp bottom fallback-only"></div>`;
         gallery.appendChild(pa);
         gallery.classList.add('single');
         setMeta.resolvedPackArt = null;
@@ -1262,19 +1284,10 @@ async function renderSetDetail(setMeta){
         }
     }
 
-    const hits = cards.filter(c => classify(c.rarity).id >= 4);
-    const feature = hits.length ? hits[Math.floor(Math.random()*hits.length)] : cards[0];
-    if(feature?.images?.large){ ImgCache.get(feature.images.large); }
-
   }catch(e){ }
 }
 
 let setDetailCardsCache = null, setDetailCardsCacheSetId = null;
-
-function isVip(){ 
-  if (profile?.is_admin) return true;
-  return !guestMode && profile?.premium_tier === 'vip'; 
-}
 
 async function beginOpen(setMeta, packCost){
   if(!session && !guestMode) {
@@ -1282,12 +1295,13 @@ async function beginOpen(setMeta, packCost){
       return;
   }
 
-  if(!isVip() && currentCredits() < packCost){ return openGetCreditsModal(true); }
+  if(!isAdminUser() && currentCredits() < packCost){ return openGetCreditsModal(true); }
   const btn = $('#open-pack-btn'); if(btn) { btn.disabled = true; btn.textContent = 'Loading cards…'; }
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
 
-    if(isVip()){
+    if(isAdminUser()){
+      // Admin gets unlimited pack openings for free
     } else if(guestMode){
       const gs = getGuestState(); 
       gs.credits -= packCost; 
@@ -1306,13 +1320,14 @@ async function beginOpen(setMeta, packCost){
     const pack = generatePack(cards);
     if(btn) btn.textContent = 'Caching pack assets...';
     
-    const urlsToPrefetch = [setMeta.images.logo];
+    const urlsToPrefetch = [];
+    if(setMeta.images.logo) urlsToPrefetch.push(setMeta.images.logo);
     if(setMeta.resolvedPackArt) urlsToPrefetch.push(setMeta.resolvedPackArt);
     if(setMeta.images.symbol) urlsToPrefetch.push(setMeta.images.symbol);
     
     pack.cards.forEach(p => {
-      urlsToPrefetch.push(p.card.images.large || p.card.images.small);
-      urlsToPrefetch.push(p.card.images.small);
+      if(p.card.images.large) urlsToPrefetch.push(p.card.images.large);
+      if(p.card.images.small) urlsToPrefetch.push(p.card.images.small);
     });
     
     const hits = cards.filter(c => classify(c.rarity).id >= 4);
@@ -1332,7 +1347,7 @@ async function beginOpen(setMeta, packCost){
   }finally{ 
     if(btn) { 
       btn.disabled=false; 
-      btn.textContent = isVip() ? 'Open pack — Unlimited (VIP)' : `Open pack — ${packCost} credits`; 
+      btn.textContent = isAdminUser() ? 'Open pack — Unlimited (Admin)' : `Open pack — ${packCost} credits`; 
     } 
   }
 }
@@ -1348,7 +1363,7 @@ function openRevealScreen(setMeta, pack, bgUrl){
     </div>
     <div class="stage"><div class="flipcard" id="flipcard">
       <div class="face back"></div>
-      <div class="face front"><img id="front-img" src="" alt=""/><div class="foil-layer" id="foil"></div><div class="tier-badge" id="tier-badge"></div></div>
+      <div class="face front"><img id="front-img" src="" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" alt=""/><div class="foil-layer" id="foil"></div><div class="tier-badge" id="tier-badge"></div></div>
     </div></div>
     <div class="card-name" id="card-name">&nbsp;</div>
     <div class="card-sub" id="card-sub">&nbsp;</div>
@@ -1363,10 +1378,10 @@ function openRevealScreen(setMeta, pack, bgUrl){
   
   intro.innerHTML = `
     <div class="pack-art ${setMeta.resolvedPackArt ? '' : 'is-fallback'}" style="margin:0; animation:packshake 1.1s ease-in-out;">
-      <div class="pack-art-bg" style="${authenticPackBg ? `background-image:${authenticPackBg}; background-size: 100% 100%;` : ''}"></div>
+      <div class="pack-art-bg" style="${authenticPackBg ? `background-image:${authenticPackBg}; background-size: 100% 100%;` : 'background:linear-gradient(135deg, #1e293b, #0f172a);'}"></div>
       <div class="pack-crimp top fallback-only"></div>
       <div class="pack-crimp bottom fallback-only"></div>
-      <img class="pack-art-logo fallback-only" src="${ImgCache.sync(setMeta.images.logo)}"/>
+      <img class="pack-art-logo fallback-only" src="${ImgCache.sync(setMeta.images.logo)}" onerror="this.style.display='none'"/>
     </div>
   `;
   
@@ -1402,7 +1417,7 @@ function openRevealScreen(setMeta, pack, bgUrl){
       $('#buy-slot', screen).innerHTML = '';
       const flip = $('#flipcard', screen); flip.classList.remove('flipped','rare-fx');
       if(tier.id >= 3) flip.classList.add('rare-fx');
-      if(!guestMode && profile?.is_premium) flip.classList.add(isVip() ? 'vip-fx' : 'premium-fx');
+      if(!guestMode && profile?.is_premium) flip.classList.add(isAdminUser() ? 'vip-fx' : 'premium-fx');
       $('#tap-hint', screen).textContent = 'Tap the card to flip it';
       flip.dataset.done = '0';
     }
@@ -1467,7 +1482,7 @@ function showSummary(setMeta, pack){
   pack.cards.forEach(p=>{
     const tier = classify(p.card.rarity);
     const mini = el('div','mini'+(tier.id>=4?' hit':''));
-    mini.innerHTML = `<img src="${ImgCache.sync(p.card.images.small)}"/>`;
+    mini.innerHTML = `<img src="${ImgCache.sync(p.card.images.small)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'80\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'"/>`;
     mini.addEventListener('click', ()=> showCardFullscreen(ImgCache.sync(p.card.images.large || p.card.images.small), p.card));
     grid.appendChild(mini);
   });
@@ -1599,10 +1614,13 @@ function renderCollection(){
     const grid = $('#coll-grid', wrap);
     keys.sort((a,b)=> classify(coll[b].rarity).id - classify(coll[a].rarity).id).forEach(id=>{
       const c = coll[id]; const item = el('div','coll-item');
-      item.innerHTML = `<img src=""/><span class="count">×${c.count}</span>`;
+      item.innerHTML = `<img src="" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'140\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'"/><span class="count">×${c.count}</span>`;
       item.addEventListener('click', async ()=> showCardFullscreen(await ImgCache.get(c.image), { id, ...c }));
       grid.appendChild(item);
-      ImgCache.get(c.image).then(src => item.querySelector('img').src = src);
+      ImgCache.get(c.image).then(src => {
+        const imgEl = item.querySelector('img');
+        if(imgEl) imgEl.src = src;
+      });
     });
   }
 }
@@ -1653,7 +1671,6 @@ function renderTrade(){
         return;
       }
 
-      // Deduct card from binder
       cardObj.count--;
       if(cardObj.count <= 0) {
         delete coll[selectedId];
@@ -1713,12 +1730,12 @@ function openGetCreditsModal(lowBalance=false){
       <div class="bundle${t.key==='vip' ? ' vip-bundle' : ''}">
         <div>
           <div class="amt"${t.key==='vip' ? ' style="color:var(--vip-gold);"' : ''}>${t.key==='vip' ? '👑 ' : ''}${t.label}</div>
-          <p class="sub">${t.unlimited ? 'Unlimited packs, every day' : `${t.dailyCredits.toLocaleString()} credits/day`} · ${t.price}</p>
+          <p class="sub">${t.dailyCredits.toLocaleString()} credits/day · ${t.price}</p>
         </div>
         <button class="btn ${t.key==='vip' ? 'btn-vip' : 'btn-gold'}" data-tier="${t.key}">Subscribe</button>
       </div>
     `).join('')}
-    <div class="hint">Cancel anytime. 2× referral bonus and gold foil included at every tier — VIP adds unlimited packs and the full luxury treatment.</div>` : `
+    <div class="hint">Cancel anytime. 2× referral bonus and gold foil included at every tier — VIP includes 335,000 daily credits and the full luxury treatment.</div>` : `
     <div class="bundle" style="flex-direction:column;align-items:stretch;gap:8px;">
       <div>
         <div class="amt"${currentTier?.key==='vip' ? ' style="color:var(--vip-gold);"' : ' style="color:var(--gold);"'}>${currentTier?.key==='vip' ? '👑 ' : ''}${currentTier?.label || 'Premium'} active</div>
