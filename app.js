@@ -10,9 +10,9 @@ const CONFIG = {
   BILLING_PORTAL_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-billing-portal-session',
   
   ECONOMY: {
-    STARTING_CREDITS: 500,
+    STARTING_CREDITS: 2250,
     GUEST_CREDITS: 2250, // Fair starting credit amount for guest sessions (450 * 5)
-    REFERRAL_BONUS: 250,
+    REFERRAL_BONUS: 10000,
     PREMIUM_TIERS: [
       { key:'free',    label:'Free',    price:'$0/mo',    dailyCredits:0      },
       { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
