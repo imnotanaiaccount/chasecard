@@ -954,6 +954,8 @@ function renderTopbar(){
   if(session) {
       bar.querySelector('#logout-btn').addEventListener('click', async ()=> {
           await sb.auth.signOut();
+          session = null;
+          profile = null;
           guestMode = true;
           render('home');
       });
@@ -1935,6 +1937,85 @@ function renderTrade(){
   }
 }
 
+const SHARE_BONUS = 5000;
+const SHARE_PLATFORMS = [
+  { id:'x', label:'X', icon:'𝕏' },
+  { id:'instagram', label:'Instagram', icon:'📸' },
+  { id:'facebook', label:'Facebook', icon:'📘' },
+  { id:'tiktok', label:'TikTok', icon:'🎵' },
+];
+
+function openShareIntent(platform){
+  const text = 'Just pulled some awesome cards in Chase Cards! Come open packs with me 🔥';
+  const link = location.origin + location.pathname;
+  if(navigator.share){
+    navigator.share({ title:'Chase Cards', text, url: link }).catch(()=>{});
+    return;
+  }
+  const urls = {
+    x: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(link)}&quote=${encodeURIComponent(text)}`,
+  };
+  if(urls[platform]){
+    window.open(urls[platform], '_blank', 'noopener');
+  } else {
+    navigator.clipboard?.writeText(`${text} ${link}`);
+    toast('Link copied — paste it into your ' + platform + ' post');
+    window.open(platform === 'instagram' ? 'https://www.instagram.com/' : 'https://www.tiktok.com/upload', '_blank', 'noopener');
+  }
+}
+
+function getSharedPlatforms(){
+  if(guestMode) return getGuestState().sharedPlatforms || [];
+  return profile?.shared_platforms || [];
+}
+
+async function claimShareBonus(platform, btn){
+  if(getSharedPlatforms().includes(platform)){ toast('Already claimed for this platform'); return; }
+
+  openShareIntent(platform);
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try{
+    if(guestMode){
+      const gs = getGuestState();
+      gs.credits = (Number(gs.credits) || 0) + SHARE_BONUS;
+      gs.sharedPlatforms = [...(gs.sharedPlatforms || []), platform];
+      setGuestState(gs);
+      const creditCountEl = $('#credit-count');
+      if(creditCountEl) creditCountEl.textContent = gs.credits;
+    } else {
+      const { data: newBalance, error } = await sb.rpc('claim_share_bonus', { p_platform: platform });
+      if(error) throw error;
+      profile.credits = newBalance;
+      profile.shared_platforms = [...(profile.shared_platforms || []), platform];
+      const creditCountEl = $('#credit-count');
+      if(creditCountEl) creditCountEl.textContent = newBalance;
+    }
+    SFX.coin();
+    toast(`+${SHARE_BONUS.toLocaleString()} credits — thanks for sharing!`);
+    btn.textContent = '✓ Claimed';
+  }catch(e){
+    console.error('claimShareBonus failed:', e);
+    toast(e.message === 'already_claimed' ? 'Already claimed for this platform' : 'Could not claim bonus — try again');
+    btn.disabled = false; btn.textContent = originalLabel;
+  }
+}
+
+function shareSectionHTML(){
+  const claimed = getSharedPlatforms();
+  return `
+    <div class="section-title" style="margin-top:0;">Share &amp; Earn</div>
+    <div class="hint" style="margin-bottom:10px;">Share Chase Cards for +${SHARE_BONUS.toLocaleString()} credits each (once per platform).</div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px;">
+      ${SHARE_PLATFORMS.map(p=>`
+        <button class="btn btn-secondary share-btn" data-platform="${p.id}" style="flex:1; min-width:120px;" ${claimed.includes(p.id) ? 'disabled' : ''}>${claimed.includes(p.id) ? '✓ Claimed' : `${p.icon} ${p.label}`}</button>
+      `).join('')}
+    </div>
+  `;
+}
+
 function openGetCreditsModal(lowBalance=false){
   if(!session && !guestMode){
     openAuthModal();
@@ -1955,10 +2036,14 @@ function openGetCreditsModal(lowBalance=false){
         </div>
         <button class="btn btn-primary" id="guest-signup-btn" style="width:100%;">Sign In / Sign Up</button>
       </div>
+      ${shareSectionHTML()}
     `;
     overlay.appendChild(sheet); document.body.appendChild(overlay);
     overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
     $('#guest-signup-btn', sheet).addEventListener('click', ()=>{ overlay.remove(); exitGuestMode(); });
+    sheet.querySelectorAll('.share-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=> claimShareBonus(btn.dataset.platform, btn));
+    });
     return;
   }
 
@@ -1974,7 +2059,7 @@ function openGetCreditsModal(lowBalance=false){
       <button class="btn btn-secondary" id="copy-ref">Copy</button>
     </div>
     <div class="hint" style="margin-bottom:18px;">You both get +${refBonus.toLocaleString()} credits when they sign up.${profile?.is_premium ? ' (2× Premium bonus applied)' : ''}</div>
-    
+    ${shareSectionHTML()}
     <div class="section-title" style="margin-top:0;">Membership Tiers</div>
     ${CONFIG.ECONOMY.PREMIUM_TIERS.map(t=>`
       <div class="bundle${t.key==='vip' ? ' vip-bundle' : ''}">
@@ -1996,6 +2081,9 @@ function openGetCreditsModal(lowBalance=false){
   `;
   overlay.appendChild(sheet); document.body.appendChild(overlay);
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  sheet.querySelectorAll('.share-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=> claimShareBonus(btn.dataset.platform, btn));
+  });
   $('#copy-ref', sheet).addEventListener('click', ()=>{
     navigator.clipboard?.writeText(refLink); SFX.coin(); toast('Referral link copied');
   });
