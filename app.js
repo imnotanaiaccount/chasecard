@@ -705,6 +705,7 @@ async function onLoggedIn(){
 }
 async function loadProfile(){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+  if(error) console.error('loadProfile failed:', error);
   if(!error) {
     profile = data;
     const creditCountEl = $('#credit-count');
@@ -1460,6 +1461,10 @@ async function beginOpen(setMeta, packCost, qty = 1){
       const creditCountEl = $('#credit-count');
       if(creditCountEl) creditCountEl.textContent = gs.credits;
     } else {
+      if(!profile) {
+        await loadProfile();
+        if(!profile) { toast('Could not load your account — try reloading the page.', 8000); if(btn) { btn.disabled=false; btn.textContent = 'Open 1 Pack — ' + packCost + ' cr'; } return; }
+      }
       const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: totalCost });
       if(error) throw error;
       profile.credits = newBalance; 
