@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'chasecards-universal-images-v12';
+        const CACHE_NAME = 'chasecards-universal-images-v13';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -355,7 +355,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   const coll = map[activeName] || {};
   
   if(!cardObj || !cardObj.id || !coll[cardObj.id] || coll[cardObj.id].count <= 0) {
-    toast('Card not found in active binder');
+    toast('Card not found in active collection');
     return;
   }
   
@@ -401,7 +401,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v12');
+        const cache = await caches.open('chasecards-universal-images-v13');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -717,13 +717,13 @@ async function loadProfile(){
 })();
 
 /* ============================================================
-   Multi-Collection / Binders & Trading Helpers
+   Multi-Collection & Trading Helpers
    ============================================================ */
 function getCollectionsMap() {
   let map = store.get('user_collections', null);
   if (!map || typeof map !== 'object') {
     const legacy = store.get('collection', null);
-    map = { 'Main Binder': legacy || {} };
+    map = { 'Main Collection': legacy || {} };
     store.set('user_collections', map);
   }
   return map;
@@ -733,7 +733,7 @@ function getActiveCollectionName() {
   const map = getCollectionsMap();
   let active = store.get('active_collection', null);
   if (!active || !map[active]) {
-    active = Object.keys(map)[0] || 'Main Binder';
+    active = Object.keys(map)[0] || 'Main Collection';
     store.set('active_collection', active);
   }
   return active;
@@ -843,7 +843,7 @@ function openAuthModal(resumeSetMeta = null){
     $('#modal-guest-btn', sheet).addEventListener('click', ()=>{
       overlay.remove();
       startGuestSession(false);
-      if(resumeSetMeta) beginOpen(resumeSetMeta); 
+      if(resumeSetMeta) beginOpen(resumeSetMeta, resumeSetMeta.packCost || 150, 1); 
       else render(route.name, route.params);
     });
   }
@@ -955,7 +955,7 @@ function renderTabs(){
   const tabs = el('div','tabs');
   const items = [
     { key:'home', label:'Packs', icon:'M4 12l8-8 8 8M6 10v10h12V10' },
-    { key:'collection', label:'Binders', icon:'M4 6h16M4 12h16M4 18h16' },
+    { key:'collection', label:'Collections', icon:'M4 6h16M4 12h16M4 18h16' },
     { key:'trade', label:'Trade', icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
     { key:'stats', label:'Stats', icon:'M18 20V10M12 20V4M6 20v-6' },
     { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
@@ -1325,6 +1325,10 @@ async function renderSetDetail(setMeta){
   const wrap = el('div');
   const dynamicCost = setMeta.packCost || 150;
   
+  const creds = currentCredits();
+  const numericCreds = isAdminUser() ? 999999 : (typeof creds === 'number' ? creds : parseInt(creds, 10) || CONFIG.ECONOMY.STARTING_CREDITS);
+  const maxAffordable = Math.max(1, Math.floor(numericCreds / dynamicCost));
+  
   wrap.innerHTML = `
     <div class="pack-hero">
       <img class="logo" id="hero-logo" src="" onerror="this.style.display='none'" alt=""/>
@@ -1341,8 +1345,17 @@ async function renderSetDetail(setMeta){
       </div>
 
       <div class="pack-count">10 cards per pack · ${setMeta.total} cards in ${setMeta.name}</div>
+      
+      <div style="width:100%; margin:8px 0 16px; background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:14px; font-weight:bold;">
+          <span>Quantity: <span id="qty-display" style="color:var(--cyan);">1</span> Pack</span>
+          <span id="cost-display" style="color:var(--gold);">${dynamicCost} cr</span>
+        </div>
+        <input type="range" id="pack-qty-slider" min="1" max="${maxAffordable}" value="1" style="width:100%; accent-color:var(--cyan); cursor:pointer;" />
+      </div>
+
       <div style="display:flex; gap:8px; width:100%;">
-        <button class="btn btn-primary" id="open-pack-btn" style="flex:1;">${isAdminUser() ? 'Open Pack (Admin)' : `Open Pack — ${dynamicCost} cr`}</button>
+        <button class="btn btn-primary" id="open-pack-btn" style="flex:1;">${isAdminUser() ? 'Open Packs (Admin)' : `Open 1 Pack — ${dynamicCost} cr`}</button>
       </div>
       <div class="odds-box">
         <div class="row"><span>Structure</span><b>4 common · 3 uncommon · 1 reverse holo · 2 hit slots</b></div>
@@ -1352,7 +1365,21 @@ async function renderSetDetail(setMeta){
     </div>
   `;
   app.appendChild(wrap);
-  $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta, dynamicCost));
+
+  const slider = $('#pack-qty-slider', wrap);
+  const qtyDisplay = $('#qty-display', wrap);
+  const costDisplay = $('#cost-display', wrap);
+  const openBtn = $('#open-pack-btn', wrap);
+
+  slider.addEventListener('input', () => {
+    const q = parseInt(slider.value, 10);
+    const totalCost = q * dynamicCost;
+    qtyDisplay.textContent = q;
+    costDisplay.textContent = `${totalCost.toLocaleString()} cr`;
+    openBtn.textContent = isAdminUser() ? `Open ${q} Packs (Admin)` : `Open ${q} Pack${q > 1 ? 's' : ''} — ${totalCost.toLocaleString()} cr`;
+  });
+
+  openBtn.addEventListener('click', ()=> beginOpen(setMeta, dynamicCost, parseInt(slider.value, 10)));
   
   if(setMeta.images.logo){
     ImgCache.get(setMeta.images.logo).then(src => {
@@ -1440,13 +1467,14 @@ async function renderSetDetail(setMeta){
 
 let setDetailCardsCache = null, setDetailCardsCacheSetId = null;
 
-async function beginOpen(setMeta, packCost){
+async function beginOpen(setMeta, packCost, qty = 1){
   if(!session && !guestMode) {
       openAuthModal(setMeta);
       return;
   }
 
-  if(!isAdminUser() && currentCredits() < packCost){ return openGetCreditsModal(true); }
+  const totalCost = packCost * qty;
+  if(!isAdminUser() && currentCredits() < totalCost){ return openGetCreditsModal(true); }
   const btn = $('#open-pack-btn'); if(btn) { btn.disabled = true; btn.textContent = 'Loading cards…'; }
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
@@ -1455,35 +1483,40 @@ async function beginOpen(setMeta, packCost){
       // Admin gets unlimited pack openings for free
     } else if(guestMode){
       const gs = getGuestState(); 
-      gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) - packCost; 
+      gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) - totalCost; 
       gs.usedFreePack = true;
       setGuestState(gs); 
       const creditCountEl = $('#credit-count');
       if(creditCountEl) creditCountEl.textContent = gs.credits;
     } else {
-      const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: packCost });
+      const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: totalCost });
       if(error) throw error;
       profile.credits = newBalance; 
       const creditCountEl = $('#credit-count');
       if(creditCountEl) creditCountEl.textContent = newBalance;
     }
 
-    const pack = generatePack(cards);
+    const openedPacks = [];
+    for(let i=0; i<qty; i++) {
+      openedPacks.push(generatePack(cards));
+    }
     
     updatePlayerStats(st => {
-      st.packsOpened = (st.packsOpened || 0) + 1;
-      st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : packCost);
+      st.packsOpened = (st.packsOpened || 0) + qty;
+      st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : totalCost);
       
-      pack.cards.forEach(p => {
-        const tId = classify(p.card.rarity).id;
-        if(tId > (st.rarestPull.tierId ?? -1)) {
-          st.rarestPull = {
-            name: p.card.name,
-            rarity: p.card.rarity || 'Common',
-            tierId: tId,
-            image: p.card.images.small
-          };
-        }
+      openedPacks.forEach(pack => {
+        pack.cards.forEach(p => {
+          const tId = classify(p.card.rarity).id;
+          if(tId > (st.rarestPull.tierId ?? -1)) {
+            st.rarestPull = {
+              name: p.card.name,
+              rarity: p.card.rarity || 'Common',
+              tierId: tId,
+              image: p.card.images.small
+            };
+          }
+        });
       });
     });
 
@@ -1494,29 +1527,38 @@ async function beginOpen(setMeta, packCost){
     if(setMeta.resolvedPackArt) urlsToPrefetch.push(setMeta.resolvedPackArt);
     if(setMeta.images.symbol) urlsToPrefetch.push(setMeta.images.symbol);
     
-    pack.cards.forEach(p => {
-      if(p.card.images.large) urlsToPrefetch.push(p.card.images.large);
-      if(p.card.images.small) urlsToPrefetch.push(p.card.images.small);
+    openedPacks.forEach(pack => {
+      pack.cards.forEach(p => {
+        if(p.card.images.large) urlsToPrefetch.push(p.card.images.large);
+        if(p.card.images.small) urlsToPrefetch.push(p.card.images.small);
+      });
     });
-    
-    const hits = cards.filter(c => classify(c.rarity).id >= 4);
-    const feature = hits.length ? hits[Math.floor(Math.random()*hits.length)] : cards[0];
-    const bgUrl = feature?.images?.large;
-    if (bgUrl) urlsToPrefetch.push(bgUrl);
     
     await Promise.all(urlsToPrefetch.map(url => ImgCache.get(url).catch(()=>null)));
     
+    const allFlatCards = [];
+    openedPacks.forEach(p => p.cards.forEach(c => allFlatCards.push(c)));
+
     if(!guestMode && session){
-      await sb.from('openings').insert({ user_id: session.user.id, set_id: setMeta.id, set_name: setMeta.name, cards: pack.cards.map(p=>({id:p.card.id,name:p.card.name,rarity:p.card.rarity,image:p.card.images.small})), cost: packCost });
+      for(const pack of openedPacks) {
+        await sb.from('openings').insert({ user_id: session.user.id, set_id: setMeta.id, set_name: setMeta.name, cards: pack.cards.map(p=>({id:p.card.id,name:p.card.name,rarity:p.card.rarity,image:p.card.images.small})), cost: packCost });
+      }
     }
-    persistToActiveCollection(pack.cards);
-    openRevealScreen(setMeta, pack, bgUrl);
+    persistToActiveCollection(allFlatCards);
+    
+    if(qty === 1) {
+      openRevealScreen(setMeta, openedPacks[0], openedPacks[0].cards[0]?.card?.images?.large);
+    } else {
+      showBulkSummary(setMeta, openedPacks);
+    }
   }catch(e){
     toast(e.message==='insufficient_credits' ? 'Not enough credits' : 'Something went wrong — try again');
   }finally{ 
     if(btn) { 
       btn.disabled=false; 
-      btn.textContent = isAdminUser() ? 'Open Pack (Admin)' : `Open Pack — ${packCost} cr`; 
+      const currentSliderVal = $('#pack-qty-slider')?.value || 1;
+      const currentTotalCost = currentSliderVal * packCost;
+      btn.textContent = isAdminUser() ? `Open ${currentSliderVal} Packs (Admin)` : `Open ${currentSliderVal} Pack${currentSliderVal > 1 ? 's' : ''} — ${currentTotalCost.toLocaleString()} cr`; 
     } 
   }
 }
@@ -1669,8 +1711,47 @@ function showSummary(setMeta, pack){
   $('#sum-close', sheet).addEventListener('click', ()=>{ overlay.remove(); render('home'); });
 }
 
+function showBulkSummary(setMeta, openedPacks){
+  const overlay = el('div','overlay');
+  const sheet = el('div','sheet');
+  sheet.style.maxWidth = '550px';
+  
+  const allCardsFlat = [];
+  openedPacks.forEach(p => p.cards.forEach(c => allCardsFlat.push(c)));
+  const topHits = allCardsFlat.filter(p => classify(p.card.rarity).id >= 3);
+  topHits.sort((a,b) => classify(b.card.rarity).id - classify(a.card.rarity).id);
+
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>🎉 Opened ${openedPacks.length} Packs!</h2>
+    <div class="sub">All cards have been added to your collection. (${allCardsFlat.length} total cards)</div>
+    <div style="font-weight:bold; color:var(--cyan); margin:12px 0 6px;">Top Hits & Holos (${topHits.length}):</div>
+    <div class="summary-grid" id="bulk-sum-grid" style="max-height:40vh; overflow-y:auto; padding:4px;"></div>
+    <button class="btn btn-primary" style="width:100%;margin-top:18px;" id="bulk-sum-close">Done</button>
+  `;
+  overlay.appendChild(sheet); document.body.appendChild(overlay);
+  
+  const grid = $('#bulk-sum-grid', sheet);
+  if(topHits.length === 0) {
+    grid.innerHTML = '<div class="hint">No rare or holo hits pulled in this batch.</div>';
+  } else {
+    topHits.forEach(p => {
+      const tier = classify(p.card.rarity);
+      const mini = el('div','mini'+(tier.id>=4?' hit':''));
+      mini.innerHTML = `<img src="${ImgCache.sync(p.card.images.small)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'80\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/></svg>'"/>`;
+      mini.addEventListener('click', ()=> showCardFullscreen(ImgCache.sync(p.card.images.large || p.card.images.small), p.card));
+      grid.appendChild(mini);
+    });
+  }
+
+  burstConfetti(100);
+  SFX.chase();
+
+  $('#bulk-sum-close', sheet).addEventListener('click', ()=>{ overlay.remove(); render('home'); });
+}
+
 /* ============================================================
-   Collection View (With Binders, Rename, Delete, Export/Import)
+   Collections View (With Rename, Delete, Export/Import)
    ============================================================ */
 function renderCollection(){
   const map = getCollectionsMap();
@@ -1682,7 +1763,7 @@ function renderCollection(){
   wrap.innerHTML = `
     <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div class="section-title" style="margin:0;">My Binders</div>
+        <div class="section-title" style="margin:0;">My Collections</div>
         <div style="display:flex; gap:6px;">
           <button class="btn btn-secondary" id="export-coll-btn" style="padding:6px 12px; font-size:12px;">💾 Export (.pkcard)</button>
           <label class="btn btn-secondary" style="padding:6px 12px; font-size:12px; cursor:pointer; margin:0;">
@@ -1692,66 +1773,66 @@ function renderCollection(){
       </div>
 
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <select id="binder-select" style="padding:8px 12px; border-radius:10px; background:var(--panel); color:var(--text); border:1px solid var(--edge); font-family:var(--font-body); flex:1;">
+        <select id="collection-select" style="padding:8px 12px; border-radius:10px; background:var(--panel); color:var(--text); border:1px solid var(--edge); font-family:var(--font-body); flex:1;">
           ${Object.keys(map).map(b => `<option value="${b}" ${b===activeName?'selected':''}>📁 ${b} (${Object.values(map[b]).reduce((s,c)=>s+c.count,0)} cards)</option>`).join('')}
         </select>
-        <button class="btn btn-primary" id="new-binder-btn" style="padding:8px 14px; font-size:13px;">+ New Binder</button>
-        <button class="btn btn-secondary" id="rename-binder-btn" style="padding:8px 12px; font-size:13px;">✏️ Rename</button>
-        <button class="btn btn-secondary" id="delete-binder-btn" style="padding:8px 12px; font-size:13px; color:var(--danger); border-color:var(--danger);">🗑️ Delete</button>
+        <button class="btn btn-primary" id="new-collection-btn" style="padding:8px 14px; font-size:13px;">+ New Collection</button>
+        <button class="btn btn-secondary" id="rename-collection-btn" style="padding:8px 12px; font-size:13px;">✏️ Rename</button>
+        <button class="btn btn-secondary" id="delete-collection-btn" style="padding:8px 12px; font-size:13px; color:var(--danger); border-color:var(--danger);">🗑️ Delete</button>
       </div>
-      <div class="hint" style="font-size:11px;">💡 Tap any card in your binder to view details or sell it back for 70% of estimated market value in virtual credits.</div>
+      <div class="hint" style="font-size:11px;">💡 Tap any card in your collection to view details or sell it back for 70% of estimated market value in virtual credits.</div>
     </div>
 
-    ${!keys.length ? `<div class="empty-state">Binder "${activeName}" is empty — open your first pack to start collecting!</div>` : `<div class="collection-grid" id="coll-grid"></div>`}
+    ${!keys.length ? `<div class="empty-state">Collection "${activeName}" is empty — open your first pack to start collecting!</div>` : `<div class="collection-grid" id="coll-grid"></div>`}
   `;
   app.appendChild(wrap);
 
-  $('#binder-select', wrap).addEventListener('change', (e) => {
+  $('#collection-select', wrap).addEventListener('change', (e) => {
     store.set('active_collection', e.target.value);
     render('collection');
   });
 
-  $('#new-binder-btn', wrap).addEventListener('click', () => {
-    const bName = prompt('Enter a name for the new binder:');
+  $('#new-collection-btn', wrap).addEventListener('click', () => {
+    const bName = prompt('Enter a name for the new collection:');
     if(!bName || !bName.trim()) return;
     const name = bName.trim();
-    if(map[name]) { toast('Binder already exists'); return; }
+    if(map[name]) { toast('Collection already exists'); return; }
     map[name] = {};
     store.set('user_collections', map);
     store.set('active_collection', name);
     render('collection');
-    toast(`Created binder "${name}"`);
+    toast(`Created collection "${name}"`);
   });
 
-  $('#rename-binder-btn', wrap).addEventListener('click', () => {
-    if(Object.keys(map).length <= 1) { toast('Cannot rename your only binder'); return; }
-    const newName = prompt(`Rename binder "${activeName}" to:`, activeName);
+  $('#rename-collection-btn', wrap).addEventListener('click', () => {
+    if(Object.keys(map).length <= 1) { toast('Cannot rename your only collection'); return; }
+    const newName = prompt(`Rename collection "${activeName}" to:`, activeName);
     if(!newName || !newName.trim() || newName.trim() === activeName) return;
     const trimmed = newName.trim();
-    if(map[trimmed]) { toast('A binder with that name already exists'); return; }
+    if(map[trimmed]) { toast('A collection with that name already exists'); return; }
     map[trimmed] = map[activeName];
     delete map[activeName];
     store.set('user_collections', map);
     store.set('active_collection', trimmed);
     render('collection');
-    toast('Binder renamed successfully');
+    toast('Collection renamed successfully');
   });
 
-  $('#delete-binder-btn', wrap).addEventListener('click', () => {
-    if(Object.keys(map).length <= 1) { toast('Cannot delete your last remaining binder'); return; }
-    if(!confirm(`Are you sure you want to permanently delete binder "${activeName}" and all its cards?`)) return;
+  $('#delete-collection-btn', wrap).addEventListener('click', () => {
+    if(Object.keys(map).length <= 1) { toast('Cannot delete your last remaining collection'); return; }
+    if(!confirm(`Are you sure you want to permanently delete collection "${activeName}" and all its cards?`)) return;
     delete map[activeName];
     store.set('user_collections', map);
     store.set('active_collection', Object.keys(map)[0]);
     render('collection');
-    toast('Binder permanently deleted');
+    toast('Collection permanently deleted');
   });
 
   $('#export-coll-btn', wrap).addEventListener('click', () => {
     const exportData = {
       version: 1,
       exportDate: new Date().toISOString(),
-      binderName: activeName,
+      collectionName: activeName,
       collection: coll
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
@@ -1772,7 +1853,7 @@ function renderCollection(){
       try {
         const parsed = JSON.parse(event.target.result);
         const importedColl = parsed.collection || parsed;
-        const bName = parsed.binderName || 'Imported Binder';
+        const bName = parsed.collectionName || 'Imported Collection';
         let uniqueName = bName;
         let counter = 1;
         while(map[uniqueName]) {
@@ -1782,7 +1863,7 @@ function renderCollection(){
         store.set('user_collections', map);
         store.set('active_collection', uniqueName);
         render('collection');
-        toast(`Successfully imported binder "${uniqueName}"!`);
+        toast(`Successfully imported collection "${uniqueName}"!`);
       } catch(err) {
         toast('Invalid file format. Could not import collection.');
       }
@@ -1819,12 +1900,12 @@ function renderTrade(){
     <div class="section-title">Direct Card Trade Hub</div>
     <div class="account-card" style="margin-bottom:16px;">
       <h3 style="margin-top:0; color:var(--cyan);">🤝 Send a Card</h3>
-      <p class="hint">Select a card from your active binder and send it directly to another collector by their username or email. All trades involve virtual items and simulation currency only.</p>
+      <p class="hint">Select a card from your active collection and send it directly to another collector by their username or email. All trades involve virtual items and simulation currency only.</p>
     </div>
 
     <div class="account-card" style="display:flex; flex-direction:column; gap:12px;">
       <h4 style="margin-top:0;">Select Card to Send</h4>
-      ${!cardKeys.length ? '<div class="hint">Your active binder is empty. Open some packs first!</div>' : `
+      ${!cardKeys.length ? '<div class="hint">Your active collection is empty. Open some packs first!</div>' : `
         <select id="trade-card-select">
           ${cardKeys.map(id => `<option value="${id}">${coll[id].name} (${coll[id].rarity || 'Common'}) [×${coll[id].count}]</option>`).join('')}
         </select>
