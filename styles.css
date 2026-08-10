@@ -219,3 +219,53 @@ input:focus{outline:none; border-color:var(--cyan);}
 .toast.show{opacity:1; transform:translateX(-50%) translateY(4px);}
 
 .confetti-canvas{position:fixed; inset:0; pointer-events:none; z-index:150;}
+
+/* ---------- User Profiles & Search Additions ---------- */
+.account-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.badge-guest { background: #64748b; color: #fff; }
+.badge-free { background: #475569; color: #cbd5e1; }
+.badge-bronze { background: #b45309; color: #fff; }
+.badge-gold { background: #eab308; color: #0f172a; }
+.badge-pro { background: #3b82f6; color: #fff; }
+.badge-elite { background: #8b5cf6; color: #fff; }
+.badge-vip { 
+  background: linear-gradient(135deg, #f59e0b, #ef4444, #8b5cf6); 
+  color: #fff; 
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.account-card {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 10px;
+}
+.account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+.account-header h3 { margin: 0; }
+.account-details p {
+  margin: 8px 0;
+  color: var(--dim);
+}
+.search-bar-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.search-bar-wrap input {
+  flex: 1;
+}
