@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'chasecards-universal-images-v9';
+        const CACHE_NAME = 'chasecards-universal-images-v11';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -409,7 +409,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v9');
+        const cache = await caches.open('chasecards-universal-images-v11');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -523,14 +523,24 @@ async function getSets(){
       name: s.name, 
       series: s.series || '',
       total: s.total || s.printedTotal || 0,
+      releaseDate: s.releaseDate || '',
       images: { symbol: s.images?.symbol || '', logo: s.images?.logo || '' },
     }));
     
     const totalCount = data.length;
-    data = data.map((s, idx) => ({
-      ...s,
-      packCost: calculatePackCost(idx, totalCount)
-    }));
+    data = data.map((s, idx) => {
+      let cost = calculatePackCost(idx, totalCount);
+      if (s.releaseDate) {
+        const year = parseInt(s.releaseDate.split(/[-/]/)[0], 10);
+        if (!isNaN(year) && year < 2010) {
+          cost *= 2; // 100% more expensive (doubled)
+        }
+      }
+      return {
+        ...s,
+        packCost: cost
+      };
+    });
 
     globalSortedSets = data;
     store.set('cache_sets_v2', { t: Date.now(), data });
@@ -1681,12 +1691,9 @@ async function beginBoosterBox(setMeta, boxCost) {
 
   const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
   
-  const allBoxCards = [];
-  const allPacks = [];
+  const allBoxPacks = [];
   for(let i=0; i<36; i++) {
-    const pk = generatePack(cards);
-    allPacks.push(pk);
-    pk.cards.forEach(c => allBoxCards.push(c));
+    allBoxPacks.push(generatePack(cards));
   }
 
   updatePlayerStats(st => {
@@ -1694,84 +1701,200 @@ async function beginBoosterBox(setMeta, boxCost) {
     st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : boxCost);
   });
 
-  persistToActiveCollection(allBoxCards);
-  openBoosterBoxAnimationScreen(setMeta, allPacks);
+  openBoosterBoxTray(setMeta, allBoxPacks);
 }
 
-function openBoosterBoxAnimationScreen(setMeta, allPacks) {
+function openBoosterBoxTray(setMeta, allPacks) {
   const overlay = el('div', 'overlay');
   overlay.style.zIndex = '400';
-  overlay.style.background = 'rgba(15, 23, 42, 0.95)';
+  overlay.style.background = 'rgba(15, 23, 42, 0.96)';
   overlay.style.display = 'flex';
   overlay.style.flexDirection = 'column';
   overlay.style.alignItems = 'center';
   overlay.style.justifyContent = 'center';
-  overlay.style.padding = '20px';
+  overlay.style.padding = '16px';
 
-  let currentPackIndex = 0;
+  let openedCount = allPacks.filter(p => p.opened).length;
   const totalPacks = allPacks.length;
 
-  overlay.innerHTML = `
-    <div style="width:100%; max-width:450px; text-align:center; animation: zoomIn 0.3s ease;">
-      <div style="font-size:22px; font-weight:bold; color:var(--gold); margin-bottom:6px; font-family:var(--font-display);">📦 BOOSTER BOX UNBOXING</div>
-      <div class="hint" style="margin-bottom:20px;">${setMeta.name} · 36 Packs Chamber</div>
-      
-      <div id="box-stage" style="position:relative; width:100%; height:320px; background:var(--panel); border:1px solid var(--edge); border-radius:18px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; box-shadow:0 20px 40px rgba(0,0,0,0.6); overflow:hidden;">
-         <div id="box-art-preview" style="width:140px; height:200px; background:linear-gradient(135deg, #3b82f6, #1e293b); border-radius:10px; margin-bottom:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); background-image:url('${setMeta.resolvedPackArt || ''}'); background-size:cover;"></div>
-         <div id="box-pack-counter" style="font-size:16px; font-weight:bold; color:var(--cyan);">Opening Pack 1 / 36</div>
-         <div id="box-hit-banner" style="font-size:13px; color:var(--gold); margin-top:6px; min-height:18px; font-weight:600;"></div>
+  function renderTrayHTML() {
+    openedCount = allPacks.filter(p => p.opened).length;
+    overlay.innerHTML = `
+      <div style="width:100%; max-width:500px; display:flex; flex-direction:column; align-items:center; max-height:90vh;">
+        <div style="display:flex; justify-content:space-between; width:100%; align-items:center; margin-bottom:12px;">
+          <div>
+            <div style="font-size:18px; font-weight:bold; color:var(--gold); font-family:var(--font-display);">📦 ${setMeta.name} Booster Box</div>
+            <div class="hint">Opened: <span id="opened-counter">${openedCount}</span> / ${totalPacks} Packs</div>
+          </div>
+          <button class="btn btn-secondary" id="close-box-tray" style="padding:6px 12px; font-size:12px;">✕ Close Tray</button>
+        </div>
+
+        <div style="width:100%; overflow-y:auto; max-height:60vh; padding:8px; background:var(--panel-2); border:1px solid var(--edge); border-radius:14px; display:grid; grid-template-columns:repeat(6, 1fr); gap:8px;" id="box-packs-grid">
+           ${allPacks.map((pk, idx) => `
+             <div class="box-pack-slot ${pk.opened ? 'opened' : ''}" data-idx="${idx}" style="aspect-ratio:3/4; background: ${pk.opened ? 'var(--panel)' : 'linear-gradient(135deg, #3b82f6, #1e293b)'}; border:2px solid ${pk.opened ? 'var(--edge)' : 'var(--cyan)'}; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; position:relative; overflow:hidden; box-shadow:0 4px 10px rgba(0,0,0,0.4); transition: transform 0.2s;">
+               ${pk.opened ? `<span style="font-size:12px; color:var(--cyan); font-weight:bold;">✓</span>` : `<span style="font-size:10px; color:#fff; font-weight:bold; text-align:center; padding:2px;">#${idx+1}</span>`}
+             </div>
+           `).join('')}
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:16px; width:100%;">
+          <button class="btn btn-primary" id="open-next-box-pack" style="flex:1; padding:12px; font-weight:bold;">⚡ Open Next Pack</button>
+          <button class="btn btn-secondary" id="finish-box-btn" style="padding:12px;">View Box Summary</button>
+        </div>
       </div>
+    `;
 
-      <div style="display:flex; gap:10px; margin-top:20px; width:100%;">
-        <button class="btn btn-primary" id="rip-next-pack-btn" style="flex:1; padding:14px; font-size:16px;">⚡ Rip Next Pack</button>
-        <button class="btn btn-secondary" id="skip-box-btn" style="padding:14px;">Skip to Summary</button>
-      </div>
-    </div>
-  `;
+    $('#close-box-tray', overlay).addEventListener('click', () => {
+      overlay.remove();
+      render('home');
+    });
 
-  document.body.appendChild(overlay);
-  SFX.tear();
-  vibrate([20,40,20]);
-
-  const counterEl = $('#box-pack-counter', overlay);
-  const hitBannerEl = $('#box-hit-banner', overlay);
-  const ripBtn = $('#rip-next-pack-btn', overlay);
-  const skipBtn = $('#skip-box-btn', overlay);
-
-  function processNextPack() {
-    if(currentPackIndex >= totalPacks) {
+    $('#finish-box-btn', overlay).addEventListener('click', () => {
       overlay.remove();
       showBoxSummary(setMeta, allPacks);
-      return;
-    }
+    });
 
-    const pack = allPacks[currentPackIndex];
-    currentPackIndex++;
-    counterEl.textContent = `Opening Pack ${currentPackIndex} / ${totalPacks}`;
-    
-    const bestInPack = pack.cards.reduce((a,b)=> classify(b.card.rarity).id > classify(a.card.rarity).id ? b : a);
-    const tier = classify(bestInPack.card.rarity);
+    $('#open-next-box-pack', overlay).addEventListener('click', () => {
+      const nextIdx = allPacks.findIndex(p => !p.opened);
+      if(nextIdx === -1) {
+        overlay.remove();
+        showBoxSummary(setMeta, allPacks);
+        return;
+      }
+      openBoxPackModal(setMeta, allPacks, nextIdx, () => {
+        renderTrayHTML();
+      });
+    });
 
-    if(tier.id >= 4) {
-      SFX.hit();
-      vibrate([25,50,25]);
-      hitBannerEl.style.color = tier.color;
-      hitBannerEl.textContent = `✨ HIT! Pulled ${bestInPack.card.name} (${bestInPack.card.rarity})`;
-    } else {
-      SFX.common();
-      hitBannerEl.textContent = `Standard pack opened...`;
-    }
-
-    if(currentPackIndex >= totalPacks) {
-      ripBtn.textContent = '🎉 View Booster Box Summary';
-    }
+    overlay.querySelectorAll('.box-pack-slot').forEach(slot => {
+      slot.addEventListener('click', () => {
+        const idx = parseInt(slot.dataset.idx);
+        if(allPacks[idx].opened) {
+          toast('This pack has already been opened!');
+          return;
+        }
+        openBoxPackModal(setMeta, allPacks, idx, () => {
+          renderTrayHTML();
+        });
+      });
+    });
   }
 
-  ripBtn.addEventListener('click', processNextPack);
-  skipBtn.addEventListener('click', () => {
-    overlay.remove();
-    showBoxSummary(setMeta, allPacks);
-  });
+  renderTrayHTML();
+  document.body.appendChild(overlay);
+}
+
+function openBoxPackModal(setMeta, allPacks, packIdx, onClosed) {
+  const pack = allPacks[packIdx];
+  const screen = el('div','reveal-screen');
+  screen.style.zIndex = '500';
+  let idx = 0; let bestTier = 0;
+  
+  screen.innerHTML = `
+    <div class="reveal-header">
+      <div class="reveal-progress" id="prog">Card 1 / ${pack.cards.length}</div>
+      <button class="close-x" id="close-box-pack">✕</button>
+    </div>
+    <div class="stage"><div class="flipcard" id="flipcard">
+      <div class="face back"></div>
+      <div class="face front"><img id="front-img" src="" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'280\'><rect width=\'100%\' height=\'100%\' fill=\'%231e293b\'/><text x=\'50%\' y=\'50%\' fill=\'%2394a3b8\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'14\'>Image Unavailable</text></svg>'" alt=""/><div class="foil-layer" id="foil"></div><div class="tier-badge" id="tier-badge"></div></div>
+    </div></div>
+    <div class="card-name" id="card-name">&nbsp;</div>
+    <div class="card-sub" id="card-sub">&nbsp;</div>
+    <div id="buy-slot"></div>
+    <div class="dots" id="dots"></div>
+    <div class="tap-hint" id="tap-hint">Tap the card to flip it</div>
+  `;
+  const flashLayer = el('div','flash-layer'); document.body.appendChild(flashLayer);
+
+  const intro = el('div','pack-intro');
+  let authenticPackBg = setMeta.resolvedPackArt ? `url('${ImgCache.sync(setMeta.resolvedPackArt)}')` : '';
+  
+  intro.innerHTML = `
+    <div class="pack-art ${setMeta.resolvedPackArt ? '' : 'is-fallback'}" id="rip-wrapper" style="margin:0; cursor:grab; touch-action:none;">
+      <div class="pack-art-bg" style="${authenticPackBg ? `background-image:${authenticPackBg}; background-size: 100% 100%;` : 'background:linear-gradient(135deg, #1e293b, #0f172a);'}"></div>
+      <div class="pack-crimp top fallback-only"></div>
+      <div class="pack-crimp bottom fallback-only"></div>
+      <img class="pack-art-logo fallback-only" src="${ImgCache.sync(setMeta.images.logo)}" onerror="this.style.display='none'"/>
+      <div style="position:absolute; bottom:15px; width:100%; text-align:center; font-weight:bold; color:#fff; font-size:13px; text-shadow:0 2px 4px rgba(0,0,0,0.8);">👆 Pack #${packIdx+1} — Swipe or Tap to Rip!</div>
+    </div>
+  `;
+  
+  document.body.appendChild(intro);
+
+  let startY = 0;
+  const ripEl = intro.querySelector('#rip-wrapper');
+  
+  function triggerRip() {
+    SFX.tear();
+    vibrate([15,30,15]);
+    ripEl.style.animation = 'packrip 0.4s ease-out forwards';
+    setTimeout(()=>{
+      intro.remove(); document.body.appendChild(screen); boot();
+    }, 380);
+  }
+
+  ripEl.addEventListener('pointerdown', (e) => { startY = e.clientY; });
+  ripEl.addEventListener('pointerup', (e) => { triggerRip(); });
+
+  function finishPackOpening() {
+    pack.opened = true;
+    persistToActiveCollection(pack.cards);
+    screen.remove();
+    flashLayer.remove();
+    onClosed();
+  }
+
+  function boot(){
+    const dotsWrap = $('#dots', screen);
+    pack.cards.forEach(()=> dotsWrap.appendChild(el('span')));
+    $('#close-box-pack', screen).addEventListener('click', finishPackOpening);
+
+    function showCard(i){
+      const p = pack.cards[i]; const tier = classify(p.card.rarity);
+      bestTier = Math.max(bestTier, tier.id);
+      $('#prog', screen).textContent = `Card ${i+1} / ${pack.cards.length}`;
+      $('#front-img', screen).src = ImgCache.sync(p.card.images.large || p.card.images.small);
+      
+      $('#card-name', screen).innerHTML = '&nbsp;';
+      $('#card-sub', screen).innerHTML = '&nbsp;';
+      
+      const badge = $('#tier-badge', screen); badge.textContent = tier.label; badge.style.background = tier.color;
+      $('#buy-slot', screen).innerHTML = '';
+      const flip = $('#flipcard', screen); flip.classList.remove('flipped','rare-fx');
+      if(tier.id >= 3) flip.classList.add('rare-fx');
+      $('#tap-hint', screen).textContent = 'Tap the card to flip it';
+      flip.dataset.done = '0';
+    }
+    function markDot(i, tier){
+      const dot = dotsWrap.children[i]; dot.classList.add('done'); if(tier>=4) dot.classList.add('hit');
+    }
+    showCard(0);
+
+    $('#flipcard', screen).addEventListener('click', function(){
+      if(this.dataset.done==='1'){
+        idx++;
+        if(idx >= pack.cards.length){ finishPackOpening(); return; }
+        this.classList.remove('flipped'); this.dataset.done='0';
+        setTimeout(()=>showCard(idx), 180);
+        return;
+      }
+      this.classList.add('flipped'); this.dataset.done='1';
+      const cardObj = pack.cards[idx].card;
+      const tier = classify(cardObj.rarity);
+      markDot(idx, tier.id);
+      SFX.flip();
+      setTimeout(()=>{
+        $('#card-name', screen).textContent = cardObj.name;
+        $('#card-sub', screen).textContent = `${cardObj.rarity || 'Common'}${pack.cards[idx].foil ? ' · Foil' : ''} — ${cardObj.set?.name || setMeta.name}`;
+        $('#buy-slot', screen).innerHTML = buyLink(cardObj);
+        if(tier.id>=7){
+          SFX.chase(); vibrate([30,60,30,60,80]); burstConfetti(90);
+        } else if(tier.id>=4){ SFX.hit(); vibrate([20,40,20]); burstConfetti(45); }
+      }, 250);
+      $('#tap-hint', screen).textContent = idx < pack.cards.length-1 ? 'Tap to reveal the next card' : 'Tap to return to box tray';
+    });
+  }
 }
 
 function showBoxSummary(setMeta, allPacks) {
@@ -1785,11 +1908,11 @@ function showBoxSummary(setMeta, allPacks) {
 
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
-    <h2>📦 Booster Box Results</h2>
-    <div class="sub">Successfully unboxed 36 packs from ${setMeta.name}! Total pulls: 360 cards.</div>
-    <div style="font-weight:bold; color:var(--cyan); margin:12px 0 6px;">Top Hits (${topHits.length} Ultra/Secret Rares Pulled):</div>
+    <h2>📦 Booster Box Summary</h2>
+    <div class="sub">Completed ${setMeta.name} Booster Box! Total cards added to binders.</div>
+    <div style="font-weight:bold; color:var(--cyan); margin:12px 0 6px;">Top Hits (${topHits.length} Ultra/Secret Rares):</div>
     <div class="summary-grid" id="box-sum-grid"></div>
-    <button class="btn btn-primary" style="width:100%; margin-top:18px;" id="box-sum-close">Add All to Binders & Done</button>
+    <button class="btn btn-primary" style="width:100%; margin-top:18px;" id="box-sum-close">Done</button>
   `;
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
