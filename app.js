@@ -11,15 +11,15 @@ const CONFIG = {
   
   ECONOMY: {
     STARTING_CREDITS: 2250,
-    GUEST_CREDITS: 2250, // Fair starting credit amount for guest sessions (450 * 5)
-    REFERRAL_BONUS: 10000,
+    GUEST_CREDITS: 2250,
+    REFERRAL_BONUS: 25000,
     PREMIUM_TIERS: [
-      { key:'free',    label:'Free',    price:'$0/mo',    dailyCredits:0      },
-      { key:'starter', label:'Starter', price:'$3.49/mo', dailyCredits:3500  },
-      { key:'plus',    label:'Plus',    price:'$6.99/mo', dailyCredits:10000 },
-      { key:'pro',     label:'Pro',     price:'$13.99/mo', dailyCredits:20000 },
-      { key:'elite',   label:'Elite',   price:'$24.49/mo', dailyCredits:33500 },
-      { key:'vip',     label:'VIP',     price:'$99.99/mo', dailyCredits:100000 }, // VIP daily credits = 100,000 credits/day
+      { key:'free',    label:'Free',    price:'$0/mo',    creditDesc:'0 credits'              },
+      { key:'starter', label:'Starter', price:'$3.49/mo', creditDesc:'35,000 credits/mo upfront' },
+      { key:'plus',    label:'Plus',    price:'$6.99/mo', creditDesc:'100,000 credits/mo upfront' },
+      { key:'pro',     label:'Pro',     price:'$13.99/mo',creditDesc:'200,000 credits/mo upfront' },
+      { key:'elite',   label:'Elite',   price:'$24.49/mo',creditDesc:'335,000 credits/mo upfront' },
+      { key:'vip',     label:'VIP',     price:'$99.99/mo',creditDesc:'100,000 credits/day (Daily Drip)' },
     ],
   },
 };
@@ -264,7 +264,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
 }
 
 /* ============================================================
-   Image Caching System (Everything/Every Image Cached with Robust Fallbacks)
+   Image Caching System
    ============================================================ */
 const ImgCache = {
   blobUrls: {},
@@ -298,10 +298,7 @@ const ImgCache = {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => { this.blobUrls[url] = url; resolve(url); };
-      img.onerror = () => {
-        this.blobUrls[url] = url;
-        resolve(url);
-      };
+      img.onerror = () => { resolve(''); };
       img.src = url;
     });
   },
@@ -557,7 +554,7 @@ async function onLoggedIn(){
   await loadProfile();
   const pendingRef = store.get('pending_ref');
   if(pendingRef && profile){
-    try{ await sb.rpc('redeem_referral', { p_code: pendingRef }); store.set('pending_ref', null); await loadProfile(); toast('Referral bonus applied — +' + CONFIG.ECONOMY.REFERRAL_BONUS + ' credits'); }
+    try{ await sb.rpc('redeem_referral', { p_code: pendingRef }); store.set('pending_ref', null); await loadProfile(); toast('Referral bonus applied — +' + CONFIG.ECONOMY.REFERRAL_BONUS.toLocaleString() + ' credits'); }
     catch(e){ store.set('pending_ref', null); }
   }
   render('home');
@@ -566,8 +563,8 @@ async function loadProfile(){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if(!error) {
     profile = data;
-    // Automatically redeem daily credits silently in the background if applicable
-    if (profile.is_premium) {
+    // Only VIP tier gets daily credits (100k/day). Other tiers get monthly lump sums upfront.
+    if (profile.premium_tier === 'vip') {
       const today = new Date().toISOString().slice(0, 10);
       if (profile.last_daily_grant !== today) {
         sb.rpc('claim_daily_credits').then(({ data: newCreds, error: claimErr }) => {
@@ -667,7 +664,7 @@ function openAuthModal(resumeSetMeta = null){
     sheet.innerHTML = `
       <div class="sheet-handle"></div>
       <h2>Welcome Back</h2>
-      <div class="sub">Choose how you'd like to log in or sign up. New accounts receive ${CONFIG.ECONOMY.STARTING_CREDITS} starting credits!</div>
+      <div class="sub">Choose how you'd like to log in or sign up. New accounts receive ${CONFIG.ECONOMY.STARTING_CREDITS.toLocaleString()} starting credits!</div>
       
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
           <button class="btn btn-secondary" type="button" id="google-auth-btn" style="display:flex; align-items:center; justify-content:center; gap:8px;">
@@ -686,7 +683,7 @@ function openAuthModal(resumeSetMeta = null){
 
       <div style="height:1px; background:var(--edge); margin:20px 0;"></div>
       <button class="btn btn-secondary" type="button" id="modal-guest-btn" style="width:100%;">Continue as guest</button>
-      <div class="hint" style="margin-top:8px;text-align:center;">Guests get ${CONFIG.ECONOMY.GUEST_CREDITS} credits on this device.</div>
+      <div class="hint" style="margin-top:8px;text-align:center;">Guests get ${CONFIG.ECONOMY.GUEST_CREDITS.toLocaleString()} credits on this device.</div>
     `;
 
     const errBox = $('#auth-error-msg', sheet);
@@ -1136,7 +1133,7 @@ async function renderHome(){
       if(s.images.symbol) {
         ImgCache.get(s.images.symbol).then(src => {
           const imgEl = card.querySelector('img');
-          if(imgEl) imgEl.src = src;
+          if(imgEl && src) imgEl.src = src;
         });
       }
     });
@@ -1183,9 +1180,9 @@ async function renderSetDetail(setMeta){
   if(setMeta.images.logo){
     ImgCache.get(setMeta.images.logo).then(src => {
       const heroLogo = $('#hero-logo');
-      if(heroLogo) heroLogo.src = src; 
+      if(heroLogo && src) heroLogo.src = src; 
       const fal = $('#pack-art-logo', wrap);
-      if(fal) fal.src = src;
+      if(fal && src) fal.src = src;
     });
   }
 
@@ -1597,7 +1594,7 @@ function renderCollection(){
       grid.appendChild(item);
       ImgCache.get(c.image).then(src => {
         const imgEl = item.querySelector('img');
-        if(imgEl) imgEl.src = src;
+        if(imgEl && src) imgEl.src = src;
       });
     });
   }
@@ -1675,11 +1672,11 @@ function openGetCreditsModal(lowBalance=false){
     sheet.innerHTML = `
       <div class="sheet-handle"></div>
       <h2>${lowBalance ? 'Your free packs are used up' : 'Get more credits'}</h2>
-      <div class="sub">Guest mode gets ${CONFIG.ECONOMY.GUEST_CREDITS} credits per device — sign in to unlock referrals and save your collection permanently.</div>
+      <div class="sub">Guest mode gets ${CONFIG.ECONOMY.GUEST_CREDITS.toLocaleString()} credits per device — sign in to unlock referrals and save your collection permanently.</div>
       <div class="bundle" style="flex-direction:column;align-items:stretch;gap:10px;">
         <div>
           <div class="amt">Log in or create an account</div>
-          <p class="sub">Keeps your collection and unlocks referrals (+${CONFIG.ECONOMY.REFERRAL_BONUS} credits each).</p>
+          <p class="sub">Keeps your collection and unlocks referrals (+${CONFIG.ECONOMY.REFERRAL_BONUS.toLocaleString()} credits each).</p>
         </div>
         <button class="btn btn-primary" id="guest-signup-btn" style="width:100%;">Sign In / Sign Up</button>
       </div>
@@ -1701,26 +1698,26 @@ function openGetCreditsModal(lowBalance=false){
       <code id="ref-link">${refLink}</code>
       <button class="btn btn-secondary" id="copy-ref">Copy</button>
     </div>
-    <div class="hint" style="margin-bottom:18px;">You both get +${refBonus} credits when they sign up.${profile?.is_premium ? ' (2× Premium bonus applied)' : ''}</div>
-    ${!profile?.is_premium ? `
-    <div class="section-title" style="margin-top:0;">Premium — daily credits</div>
+    <div class="hint" style="margin-bottom:18px;">You both get +${refBonus.toLocaleString()} credits when they sign up.${profile?.is_premium ? ' (2× Premium bonus applied)' : ''}</div>
+    
+    <div class="section-title" style="margin-top:0;">Membership Tiers</div>
     ${CONFIG.ECONOMY.PREMIUM_TIERS.map(t=>`
       <div class="bundle${t.key==='vip' ? ' vip-bundle' : ''}">
         <div>
           <div class="amt"${t.key==='vip' ? ' style="color:var(--vip-gold);"' : ''}>${t.key==='vip' ? '👑 ' : ''}${t.label}</div>
-          <p class="sub">${t.dailyCredits.toLocaleString()} credits/day · ${t.price}</p>
+          <p class="sub">${t.creditDesc} · ${t.price}</p>
         </div>
-        <button class="btn ${t.key==='vip' ? 'btn-vip' : 'btn-gold'}" data-tier="${t.key}">Subscribe</button>
+        ${t.key !== 'free' && (!profile || profile.premium_tier !== t.key) ? `<button class="btn ${t.key==='vip' ? 'btn-vip' : 'btn-gold'}" data-tier="${t.key}">Subscribe</button>` : ''}
       </div>
     `).join('')}
-    <div class="hint">Cancel anytime. 2× referral bonus and gold foil included at every tier — VIP includes 100,000 daily credits and the full luxury treatment.</div>` : `
-    <div class="bundle" style="flex-direction:column;align-items:stretch;gap:8px;">
+    ${profile?.is_premium ? `
+    <div class="bundle" style="flex-direction:column;align-items:stretch;gap:8px; margin-top:12px;">
       <div>
         <div class="amt"${currentTier?.key==='vip' ? ' style="color:var(--vip-gold);"' : ' style="color:var(--gold);"'}>${currentTier?.key==='vip' ? '👑 ' : ''}${currentTier?.label || 'Premium'} active</div>
         <p class="sub">Manage or cancel your subscription anytime.</p>
       </div>
       <button class="btn btn-secondary" id="manage-billing-btn">Manage subscription</button>
-    </div>`}
+    </div>` : ''}
   `;
   overlay.appendChild(sheet); document.body.appendChild(overlay);
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
