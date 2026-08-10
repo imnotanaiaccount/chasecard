@@ -25,7 +25,91 @@ const CONFIG = {
 };
 
 /* ============================================================
-   Dynamic Styles Injection (Includes UI, Inputs & Loading Bar)
+   PWA Setup & Aggressive Universal Image Caching Service Worker
+   ============================================================ */
+(function setupPWA() {
+  const manifest = {
+    name: "PackPull - TCG Simulator",
+    short_name: "PackPull",
+    start_url: ".",
+    display: "standalone",
+    background_color: "#0f172a",
+    theme_color: "#0f172a",
+    icons: [
+      { src: "https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/icon-512.png", sizes: "512x512", type: "image/png" }
+    ]
+  };
+  const stringManifest = JSON.stringify(manifest);
+  const blob = new Blob([stringManifest], { type: 'application/json' });
+  const manifestURL = URL.createObjectURL(blob);
+  
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = manifestURL;
+  document.head.appendChild(link);
+
+  const metaTheme = document.createElement('meta');
+  metaTheme.name = 'theme-color';
+  metaTheme.content = '#0f172a';
+  document.head.appendChild(metaTheme);
+
+  const metaApple = document.createElement('meta');
+  metaApple.name = 'apple-mobile-web-app-capable';
+  metaApple.content = 'yes';
+  document.head.appendChild(metaApple);
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      const swCode = `
+        const CACHE_NAME = 'packpull-universal-images-v6';
+        self.addEventListener('install', e => {
+          self.skipWaiting();
+          e.waitUntil(caches.open(CACHE_NAME));
+        });
+        self.addEventListener('activate', e => {
+          e.waitUntil(
+            caches.keys().then(keys => Promise.all(
+              keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+            )).then(() => self.clients.claim())
+          );
+        });
+        self.addEventListener('fetch', e => {
+          const url = new URL(e.request.url);
+          const isImage = e.request.destination === 'image' || url.pathname.match(/\\.(png|jpe?g|webp|svg|gif)$/i) || url.hostname.includes('pokemontcg.io') || url.hostname.includes('githubusercontent.com');
+          
+          if (isImage) {
+            e.respondWith(
+              caches.open(CACHE_NAME).then(async cache => {
+                const cachedRes = await cache.match(e.request);
+                if (cachedRes) return cachedRes;
+                try {
+                  const netRes = await fetch(e.request, { mode: 'cors', credentials: 'omit' });
+                  if (netRes && netRes.ok) {
+                    cache.put(e.request, netRes.clone());
+                  }
+                  return netRes;
+                } catch (err) {
+                  return cachedRes || Response.error();
+                }
+              })
+            );
+          } else {
+            e.respondWith(
+              caches.match(e.request).then(cached => cached || fetch(e.request).catch(() => caches.match('/')))
+            );
+          }
+        });
+      `;
+      const swBlob = new Blob([swCode], { type: 'text/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl).catch(() => {});
+    });
+  }
+})();
+
+/* ============================================================
+   Dynamic Styles Injection
    ============================================================ */
 const customStyles = document.createElement('style');
 customStyles.innerHTML = `
@@ -171,6 +255,25 @@ function buyLink(card){
 }
 
 /* ============================================================
+   Player Statistics & Milestones Store
+   ============================================================ */
+function getPlayerStats() {
+  return store.get('player_stats', {
+    packsOpened: 0,
+    creditsSpent: 0,
+    rarestPull: { name: 'None Recorded', rarity: 'Common', tierId: -1, image: '' },
+    cardsSold: 0,
+    totalSoldEarned: 0
+  });
+}
+
+function updatePlayerStats(updater) {
+  const stats = getPlayerStats();
+  updater(stats);
+  store.set('player_stats', stats);
+}
+
+/* ============================================================
    Card Market Valuation & 70% Sell-Back System (Virtual Currency Only)
    ============================================================ */
 const RARITY_ESTIMATED_VALUES = {
@@ -247,6 +350,11 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   store.set('user_collections', map);
   store.set('collection', coll);
   
+  updatePlayerStats(st => {
+    st.cardsSold = (st.cardsSold || 0) + 1;
+    st.totalSoldEarned = (st.totalSoldEarned || 0) + creditsEarned;
+  });
+
   if(guestMode) {
     const gs = getGuestState();
     gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) + creditsEarned;
@@ -264,7 +372,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
 }
 
 /* ============================================================
-   Image Caching System
+   Aggressive Universal Image Caching System
    ============================================================ */
 const ImgCache = {
   blobUrls: {},
@@ -275,7 +383,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('packpull-images-v4-pokemontcg');
+        const cache = await caches.open('packpull-universal-images-v6');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -634,6 +742,7 @@ function render(name, params={}){
   if(name==='set') renderSetDetail(params.set);
   if(name==='collection') renderCollection();
   if(name==='search') renderSearch();
+  if(name==='stats') renderStats();
   if(name==='profile') renderProfile();
   if(name==='user_collection') renderUserCollection(params.userId, params.username);
   if(name==='trade') renderTrade();
@@ -810,6 +919,7 @@ function renderTabs(){
     { key:'collection', label:'Collection', icon:'M4 6h16M4 12h16M4 18h16' },
     { key:'search', label:'Search', icon:'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
     { key:'trade', label:'Trade', icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
+    { key:'stats', label:'Stats', icon:'M18 20V10M12 20V4M6 20v-6' },
     { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
   ];
   items.forEach(it=>{
@@ -977,6 +1087,47 @@ async function renderProfile() {
         if (debugHint && session) debugHint.style.display = 'block';
     }
   }, 0);
+}
+
+async function renderStats() {
+  const stats = getPlayerStats();
+  const wrap = el('div');
+  wrap.innerHTML = `
+    <div class="section-title">Stats & Milestones</div>
+    
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:20px;">
+      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
+        <div style="font-size:24px; font-weight:bold; color:var(--cyan);">${stats.packsOpened.toLocaleString()}</div>
+        <div class="hint" style="margin-top:4px;">Packs Opened</div>
+      </div>
+      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
+        <div style="font-size:24px; font-weight:bold; color:var(--gold);">${stats.creditsSpent.toLocaleString()}</div>
+        <div class="hint" style="margin-top:4px;">Credits Spent</div>
+      </div>
+      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
+        <div style="font-size:24px; font-weight:bold; color:var(--tier-sillus);">${stats.cardsSold.toLocaleString()}</div>
+        <div class="hint" style="margin-top:4px;">Cards Sold</div>
+      </div>
+      <div class="account-card" style="margin-top:0; text-align:center; padding:14px;">
+        <div style="font-size:24px; font-weight:bold; color:var(--tier-holo);">${stats.totalSoldEarned.toLocaleString()}</div>
+        <div class="hint" style="margin-top:4px;">Credits Earned</div>
+      </div>
+    </div>
+
+    <div class="account-card">
+      <h3 style="margin-top:0; color:var(--cyan);">🏆 Rarest Pull Trophy</h3>
+      ${stats.rarestPull.tierId >= 0 ? `
+        <div style="display:flex; align-items:center; gap:16px; margin-top:12px;">
+          <img src="${stats.rarestPull.image}" style="width:70px; height:98px; object-fit:contain; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.5);" onerror="this.style.display='none'"/>
+          <div>
+            <div style="font-weight:bold; font-size:16px; margin-bottom:4px;">${stats.rarestPull.name}</div>
+            <div class="account-badge" style="display:inline-block; background:${classify(stats.rarestPull.rarity).color}; color:#000; font-weight:bold;">${stats.rarestPull.rarity}</div>
+          </div>
+        </div>
+      ` : '<div class="hint" style="margin-top:8px;">No high-tier hits pulled yet. Open some packs to claim your trophy!</div>'}
+    </div>
+  `;
+  app.appendChild(wrap);
 }
 
 async function renderSearch() {
@@ -1283,6 +1434,24 @@ async function beginOpen(setMeta, packCost){
     }
 
     const pack = generatePack(cards);
+    
+    updatePlayerStats(st => {
+      st.packsOpened = (st.packsOpened || 0) + 1;
+      st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : packCost);
+      
+      pack.cards.forEach(p => {
+        const tId = classify(p.card.rarity).id;
+        if(tId > (st.rarestPull.tierId ?? -1)) {
+          st.rarestPull = {
+            name: p.card.name,
+            rarity: p.card.rarity || 'Common',
+            tierId: tId,
+            image: p.card.images.small
+          };
+        }
+      });
+    });
+
     if(btn) btn.textContent = 'Caching pack assets...';
     
     const urlsToPrefetch = [];
