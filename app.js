@@ -500,7 +500,7 @@ function calculatePackCost(index, totalSets) {
 }
 
 async function getSets(){
-  const cached = store.get('cache_sets_v2');
+  const cached = store.get('cache_sets_v3');
   if(cached && Date.now() - cached.t < 1000*60*60*12) {
     globalSortedSets = cached.data;
     return cached.data;
@@ -549,7 +549,7 @@ async function getSets(){
     });
 
     globalSortedSets = data;
-    store.set('cache_sets_v2', { t: Date.now(), data });
+    store.set('cache_sets_v3', { t: Date.now(), data });
     return data;
   }catch(e){
     if(cached){ toast('Showing cached sets — live data unavailable'); globalSortedSets = cached.data; return cached.data; }
@@ -1523,7 +1523,9 @@ async function beginOpen(setMeta, packCost, qty = 1){
       showBulkSummary(setMeta, openedPacks);
     }
   }catch(e){
-    toast(e.message==='insufficient_credits' ? 'Not enough credits' : 'Something went wrong — try again');
+    console.error('beginOpen failed:', e);
+    const detail = e?.message || e?.error_description || e?.details || String(e);
+    toast(e.message==='insufficient_credits' ? 'Not enough credits' : `Error: ${detail}`, 8000);
   }finally{ 
     if(btn) { 
       btn.disabled=false; 
