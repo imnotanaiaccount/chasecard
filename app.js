@@ -8,6 +8,7 @@ const CONFIG = {
   CHECKOUT_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-checkout-session',
   SUBSCRIBE_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-subscription-checkout',
   BILLING_PORTAL_ENDPOINT: 'https://YOUR-PROJECT.supabase.co/functions/v1/create-billing-portal-session',
+  
   ECONOMY: {
     STARTING_CREDITS: 500,
     PACK_COST: 450,
@@ -596,11 +597,16 @@ function getAccountTypeBadge(user, profile) {
     return { label: 'Guest', cssClass: 'badge-guest' };
   }
   
+  // Check database flag instead of hardcoded emails
+  if (profile?.is_admin) {
+      return { label: '🛠️ System Admin', cssClass: 'badge-vip' };
+  }
+  
   const tier = (profile?.premium_tier || 'free').toLowerCase();
 
   switch (tier) {
     case 'vip':
-      return { label: '👑 VIP Admin', cssClass: 'badge-vip' };
+      return { label: '👑 VIP Member', cssClass: 'badge-vip' };
     case 'elite':
       return { label: '💎 Elite VIP', cssClass: 'badge-elite' };
     case 'pro':
@@ -643,6 +649,15 @@ async function renderProfile() {
   wrap.innerHTML = `
       <div class="section-title">My Account</div>
       <div id="account-section"></div>
+      
+      <!-- Secure Admin Panel (Hidden by Default) -->
+      <div id="admin-panel" style="display:none; margin-top:30px; padding:18px; background:var(--panel-2); border:1px solid var(--vip-gold-dim); border-radius:14px; box-shadow: 0 4px 15px rgba(255, 233, 184, 0.1);">
+         <h3 style="color:var(--vip-gold); margin-top:0; font-family:var(--font-display); font-size:18px;">🛠️ Admin Controls</h3>
+         <p class="hint" style="margin-bottom:14px;">Grant lifetime VIP status to any user by email.</p>
+         <input type="email" id="admin-target-email" placeholder="user@email.com" style="width:100%; padding:14px 16px; border-radius:12px; border:1px solid var(--edge); background:var(--panel); color:var(--text); margin-bottom:12px; font-family:var(--font-body);" />
+         <button class="btn btn-vip" id="admin-grant-btn" style="width:100%;">Grant VIP Status</button>
+         <div id="admin-msg" class="hint" style="margin-top:12px; text-align:center; font-weight:bold; min-height:16px;"></div>
+      </div>
   `;
   app.appendChild(wrap);
 
@@ -662,9 +677,48 @@ async function renderProfile() {
       return;
   }
   
-  // Call the robust renderAccountArea helper function
+  // Render Account Info and Handle Admin Panel Logic
   setTimeout(() => {
     renderAccountArea(session?.user, profile);
+    
+    // Check if the database profile flags the user as an admin
+    if (session && profile?.is_admin) {
+        const adminPanel = $('#admin-panel', wrap);
+        const adminBtn = $('#admin-grant-btn', wrap);
+        const targetInput = $('#admin-target-email', wrap);
+        const msgBox = $('#admin-msg', wrap);
+        
+        if (adminPanel) adminPanel.style.display = 'block';
+        
+        if (adminBtn) {
+            adminBtn.addEventListener('click', async () => {
+                const targetEmail = targetInput.value.trim();
+                if(!targetEmail) {
+                    msgBox.style.color = 'var(--danger)';
+                    msgBox.textContent = 'Enter an email first.';
+                    return;
+                }
+                
+                adminBtn.disabled = true; 
+                adminBtn.textContent = 'Granting...';
+                
+                try {
+                    // Call the secure Supabase function
+                    const { error } = await sb.rpc('admin_grant_vip', { target_email: targetEmail });
+                    if(error) throw error;
+                    msgBox.style.color = 'var(--cyan)';
+                    msgBox.textContent = 'Success! User is now a VIP.';
+                    targetInput.value = '';
+                } catch(e) {
+                    msgBox.style.color = 'var(--danger)';
+                    msgBox.textContent = e.message;
+                }
+                
+                adminBtn.disabled = false; 
+                adminBtn.textContent = 'Grant VIP Status';
+            });
+        }
+    }
   }, 0);
 }
 
@@ -999,7 +1053,11 @@ async function renderSetDetail(setMeta){
 
 let setDetailCardsCache = null, setDetailCardsCacheSetId = null;
 
-function isVip(){ return !guestMode && profile?.premium_tier === 'vip'; }
+function isVip(){ 
+  // Check database profile flag instead of hardcoded emails
+  if (profile?.is_admin) return true;
+  return !guestMode && profile?.premium_tier === 'vip'; 
+}
 
 async function beginOpen(setMeta){
   if(!session && !guestMode) {
@@ -1116,8 +1174,11 @@ function openRevealScreen(setMeta, pack, bgUrl){
     bestTier = Math.max(bestTier, tier.id);
     $('#prog', screen).textContent = `Card ${i+1} / ${pack.cards.length}`;
     $('#front-img', screen).src = ImgCache.sync(p.card.images.large || p.card.images.small);
-    $('#card-name', screen).textContent = p.card.name;
-    $('#card-sub', screen).textContent = `${p.card.rarity || 'Common'}${p.foil ? ' · Foil' : ''} — ${p.card.set?.name || setMeta.name}`;
+    
+    // HIDE TEXT UNTIL FLIPPED
+    $('#card-name', screen).innerHTML = '&nbsp;';
+    $('#card-sub', screen).innerHTML = '&nbsp;';
+    
     const badge = $('#tier-badge', screen); badge.textContent = tier.label; badge.style.background = tier.color;
     if(!collection[p.card.id]){
       const nb = el('div','new-badge','NEW'); $('.face.front', screen).appendChild(nb);
@@ -1156,6 +1217,10 @@ function openRevealScreen(setMeta, pack, bgUrl){
     markDot(idx, tier.id);
     SFX.flip();
     setTimeout(()=>{
+      // REVEAL TEXT WHEN FLIPPED
+      $('#card-name', screen).textContent = cardObj.name;
+      $('#card-sub', screen).textContent = `${cardObj.rarity || 'Common'}${pack.cards[idx].foil ? ' · Foil' : ''} — ${cardObj.set?.name || setMeta.name}`;
+      
       $('#buy-slot', screen).innerHTML = buyLink(cardObj);
       if(tier.id>=7){
         SFX.chase(); vibrate([30,60,30,60,80]); burstConfetti(90);
