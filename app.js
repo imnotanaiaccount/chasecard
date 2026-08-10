@@ -948,12 +948,22 @@ function renderTopbar(){
   bar.querySelector('#brand-home-btn').addEventListener('click', () => render('home'));
 
   if(session) {
-      bar.querySelector('#logout-btn').addEventListener('click', async ()=> {
-          await sb.auth.signOut();
-          session = null;
-          profile = null;
-          guestMode = true;
-          render('home');
+      bar.querySelector('#logout-btn').addEventListener('click', async (e)=> {
+          const btn = e.currentTarget;
+          if(btn.dataset.busy === '1') return;
+          btn.dataset.busy = '1';
+          const origText = btn.textContent;
+          btn.textContent = '...';
+          try {
+            await sb.auth.signOut();
+          } catch(err) {
+            console.error('signOut failed:', err);
+          } finally {
+            session = null;
+            profile = null;
+            guestMode = true;
+            render('home');
+          }
       });
   } else {
       bar.querySelector('#login-btn').addEventListener('click', ()=> openAuthModal());
