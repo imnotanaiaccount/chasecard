@@ -29,8 +29,8 @@ const CONFIG = {
    ============================================================ */
 (function setupPWA() {
   const manifest = {
-    name: "PackPull - TCG Simulator",
-    short_name: "PackPull",
+    name: "Chase Cards - TCG Simulator",
+    short_name: "Chase Cards",
     start_url: ".",
     display: "standalone",
     background_color: "#0f172a",
@@ -62,7 +62,7 @@ const CONFIG = {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       const swCode = `
-        const CACHE_NAME = 'packpull-universal-images-v6';
+        const CACHE_NAME = 'chasecards-universal-images-v8';
         self.addEventListener('install', e => {
           self.skipWaiting();
           e.waitUntil(caches.open(CACHE_NAME));
@@ -255,7 +255,7 @@ function buyLink(card){
 }
 
 /* ============================================================
-   Player Statistics & Milestones Store
+   Player Statistics & Gamification Store (Streaks, Quests)
    ============================================================ */
 function getPlayerStats() {
   return store.get('player_stats', {
@@ -263,7 +263,14 @@ function getPlayerStats() {
     creditsSpent: 0,
     rarestPull: { name: 'None Recorded', rarity: 'Common', tierId: -1, image: '' },
     cardsSold: 0,
-    totalSoldEarned: 0
+    totalSoldEarned: 0,
+    lastLoginDate: '',
+    loginStreak: 0,
+    quests: {
+      openPacks: { current: 0, target: 5, claimed: false },
+      sellCards: { current: 0, target: 3, claimed: false },
+      pullHit: { current: 0, target: 1, claimed: false }
+    }
   });
 }
 
@@ -272,6 +279,22 @@ function updatePlayerStats(updater) {
   updater(stats);
   store.set('player_stats', stats);
 }
+
+function checkDailyStreak() {
+  const stats = getPlayerStats();
+  const today = new Date().toISOString().slice(0, 10);
+  if(stats.lastLoginDate !== today) {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    if(stats.lastLoginDate === yesterday) {
+      stats.loginStreak = (stats.loginStreak || 0) + 1;
+    } else {
+      stats.loginStreak = 1;
+    }
+    stats.lastLoginDate = today;
+    store.set('player_stats', stats);
+  }
+}
+checkDailyStreak();
 
 /* ============================================================
    Card Market Valuation & 70% Sell-Back System (Virtual Currency Only)
@@ -353,6 +376,9 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   updatePlayerStats(st => {
     st.cardsSold = (st.cardsSold || 0) + 1;
     st.totalSoldEarned = (st.totalSoldEarned || 0) + creditsEarned;
+    if(st.quests.sellCards.current < st.quests.sellCards.target) {
+      st.quests.sellCards.current++;
+    }
   });
 
   if(guestMode) {
@@ -383,7 +409,7 @@ const ImgCache = {
     showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('packpull-universal-images-v6');
+        const cache = await caches.open('chasecards-universal-images-v8');
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -747,6 +773,8 @@ function render(name, params={}){
   if(name==='collection') renderCollection();
   if(name==='search') renderSearch();
   if(name==='stats') renderStats();
+  if(name==='quests') renderQuests();
+  if(name==='forge') renderForge();
   if(name==='profile') renderProfile();
   if(name==='user_collection') renderUserCollection(params.userId, params.username);
   if(name==='trade') renderTrade();
@@ -898,10 +926,17 @@ function renderTopbar(){
     : `<button class="topbar-auth" id="login-btn">Log In</button>`;
 
   bar.innerHTML = `
-    <div class="brand"><span class="dot"></span>PackPull${guestMode ? ' <span style="font-size:10px;color:var(--dim-2);font-weight:700;letter-spacing:.08em;background:var(--panel);border:1px solid var(--edge);padding:2px 7px;border-radius:999px;margin-left:6px;">GUEST</span>' : ''}${isAdminUser() ? '<span class="vip-badge">🛠️ ADMIN</span>' : (profile?.premium_tier === 'vip' ? '<span class="vip-badge">👑 VIP</span>' : '')}${authBtn}</div>
+    <div class="brand" style="display:flex; align-items:center; gap:8px; flex:1;">
+      <div id="brand-home-btn" style="display:flex; align-items:center; gap:6px; cursor:pointer; flex:1;">
+        <span class="dot"></span>Chase Cards${guestMode ? ' <span style="font-size:10px;color:var(--dim-2);font-weight:700;letter-spacing:.08em;background:var(--panel);border:1px solid var(--edge);padding:2px 7px;border-radius:999px;margin-left:6px;">GUEST</span>' : ''}${isAdminUser() ? '<span class="vip-badge">🛠️ ADMIN</span>' : (profile?.premium_tier === 'vip' ? '<span class="vip-badge">👑 VIP</span>' : '')}
+      </div>
+      ${authBtn}
+    </div>
     <button class="credits-pill tappable" id="credits-btn"><span class="coin"></span><span id="credit-count">${currentCredits()}</span></button>
   `;
   
+  bar.querySelector('#brand-home-btn').addEventListener('click', () => render('home'));
+
   if(session) {
       bar.querySelector('#logout-btn').addEventListener('click', async ()=> {
           await sb.auth.signOut();
@@ -920,8 +955,9 @@ function renderTabs(){
   const tabs = el('div','tabs');
   const items = [
     { key:'home', label:'Packs', icon:'M4 12l8-8 8 8M6 10v10h12V10' },
-    { key:'collection', label:'Collection', icon:'M4 6h16M4 12h16M4 18h16' },
-    { key:'search', label:'Search', icon:'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
+    { key:'collection', label:'Binders', icon:'M4 6h16M4 12h16M4 18h16' },
+    { key:'forge', label:'Forge', icon:'M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6' },
+    { key:'quests', label:'Quests', icon:'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11' },
     { key:'trade', label:'Trade', icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
     { key:'stats', label:'Stats', icon:'M18 20V10M12 20V4M6 20v-6' },
     { key:'profile', label:'Profile', icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
@@ -960,6 +996,7 @@ function getAccountTypeBadge(user, userProfile) {
 
 function renderAccountArea(user, userProfile) {
   const badge = getAccountTypeBadge(user, userProfile);
+  const stats = getPlayerStats();
   const accountHtml = `
     <div class="account-card">
       <div class="account-header">
@@ -969,6 +1006,7 @@ function renderAccountArea(user, userProfile) {
       <div class="account-details">
         <p><strong>Credits:</strong> ${userProfile?.is_admin ? '∞ (Admin Unlimited)' : (userProfile?.credits?.toLocaleString() || CONFIG.ECONOMY.STARTING_CREDITS)}</p>
         <p><strong>Status:</strong> ${userProfile?.is_premium ? 'Active Subscription' : 'Standard'}</p>
+        <p><strong>🔥 Daily Streak:</strong> ${stats.loginStreak || 1} Days Active</p>
       </div>
     </div>
   `;
@@ -1125,6 +1163,135 @@ async function renderStats() {
     </div>
   `;
   app.appendChild(wrap);
+}
+
+/* ============================================================
+   Gamification: Quests & Achievements Dashboard
+   ============================================================ */
+async function renderQuests() {
+  const stats = getPlayerStats();
+  const wrap = el('div');
+  wrap.innerHTML = `
+    <div class="section-title">Daily Quests & Achievements</div>
+    <div class="account-card" style="margin-bottom:16px;">
+      <h3 style="margin-top:0; color:var(--cyan);">🔥 Login Streak: ${stats.loginStreak || 1} Days</h3>
+      <p class="hint">Log in daily to maintain your streak and claim rewards!</p>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      ${renderQuestItem('Open 5 Packs', stats.quests.openPacks.current, stats.quests.openPacks.target, 'quest_packs', 5000)}
+      ${renderQuestItem('Sell 3 Duplicate Cards', stats.quests.sellCards.current, stats.quests.sellCards.target, 'quest_sell', 3000)}
+    </div>
+  `;
+  app.appendChild(wrap);
+
+  wrap.querySelectorAll('.claim-quest-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qKey = btn.dataset.quest;
+      if(qKey === 'quest_packs' && !stats.quests.openPacks.claimed) {
+        stats.quests.openPacks.claimed = true;
+        awardQuestReward(5000);
+      } else if(qKey === 'quest_sell' && !stats.quests.sellCards.claimed) {
+        stats.quests.sellCards.claimed = true;
+        awardQuestReward(3000);
+      }
+      store.set('player_stats', stats);
+      render('quests');
+    });
+  });
+}
+
+function renderQuestItem(title, current, target, key, reward) {
+  const stats = getPlayerStats();
+  const isDone = current >= target;
+  const claimed = key === 'quest_packs' ? stats.quests.openPacks.claimed : stats.quests.sellCards.claimed;
+  
+  return `
+    <div class="account-card" style="display:flex; justify-content:space-between; align-items:center; margin-top:0;">
+      <div>
+        <div style="font-weight:bold; font-size:15px; margin-bottom:4px;">${title}</div>
+        <div class="hint">Progress: ${Math.min(current, target)} / ${target} · Reward: +${reward.toLocaleString()} credits</div>
+      </div>
+      <div>
+        ${claimed ? '<span class="account-badge badge-free">Claimed</span>' : (isDone ? `<button class="btn btn-primary claim-quest-btn" data-quest="${key}" style="padding:8px 14px; font-size:13px;">Claim</button>` : '<span class="account-badge badge-guest">In Progress</span>')}
+      </div>
+    </div>
+  `;
+}
+
+function awardQuestReward(amount) {
+  if(guestMode) {
+    const gs = getGuestState();
+    gs.credits = (Number(gs.credits) || CONFIG.ECONOMY.GUEST_CREDITS) + amount;
+    setGuestState(gs);
+  } else if(profile) {
+    profile.credits = (profile.credits || 0) + amount;
+    sb.from('profiles').update({ credits: profile.credits }).eq('id', session.user.id).then();
+  }
+  SFX.coin();
+  toast(`Quest completed! +${amount.toLocaleString()} credits!`);
+}
+
+/* ============================================================
+   Gamification: Card Fusion Forge
+   ============================================================ */
+async function renderForge() {
+  const map = getCollectionsMap();
+  const activeName = getActiveCollectionName();
+  const coll = map[activeName] || {};
+  const cardKeys = Object.keys(coll).filter(id => classify(coll[id].rarity).id <= 1); // Commons & Uncommons
+
+  const wrap = el('div');
+  wrap.innerHTML = `
+    <div class="section-title">🔥 Card Fusion Forge</div>
+    <div class="account-card" style="margin-bottom:16px;">
+      <h3 style="margin-top:0; color:var(--gold);">Recycle Duplicate Cards</h3>
+      <p class="hint">Sacrifice 5 Common or Uncommon cards from your active binder to forge a guaranteed Rare or higher hit!</p>
+    </div>
+
+    <div class="account-card" style="display:flex; flex-direction:column; gap:12px;">
+      <h4 style="margin-top:0;">Available Common/Uncommon Cards (Total: ${cardKeys.length})</h4>
+      ${cardKeys.length < 5 ? '<div class="hint" style="color:var(--danger);">You need at least 5 Common or Uncommon cards in your active binder to use the Forge.</div>' : `
+        <select id="forge-card-select" style="width:100%; padding:12px 14px; border-radius:12px; background:var(--panel); color:var(--text); border:1px solid var(--edge);">
+          ${cardKeys.map(id => `<option value="${id}">${coll[id].name} (${coll[id].rarity}) [Available: ${coll[id].count}]</option>`).join('')}
+        </select>
+        <div style="display:flex; align-items:center; gap:8px;">
+           <label class="hint" style="font-weight:bold;">Quantity to Sacrifice (Requires 5):</label>
+        </div>
+        <button class="btn btn-primary" id="execute-forge-btn" style="width:100%; background:linear-gradient(135deg, #f59e0b, #ef4444);">🔥 Ignite Forge (Sacrifice 5)</button>
+      `}
+    </div>
+  `;
+  app.appendChild(wrap);
+
+  if(cardKeys.length >= 5) {
+    $('#execute-forge-btn', wrap).addEventListener('click', async () => {
+      const selectedId = $('#forge-card-select', wrap).value;
+      const cardObj = coll[selectedId];
+      if(!cardObj || cardObj.count < 5) {
+        toast('You need at least 5 copies of this specific card to sacrifice.');
+        return;
+      }
+
+      cardObj.count -= 5;
+      if(cardObj.count <= 0) delete coll[selectedId];
+      map[activeName] = coll;
+      store.set('user_collections', map);
+
+      // Generate a reward hit (Rare or higher)
+      const allSets = await getSets();
+      const randomSet = allSets[Math.floor(Math.random() * allSets.length)];
+      const setCards = await getCardsForSet(randomSet.id);
+      const hitsPool = setCards.filter(c => classify(c.rarity).id >= 2);
+      const forgedCard = hitsPool.length ? hitsPool[Math.floor(Math.random() * hitsPool.length)] : setCards[0];
+
+      persistToActiveCollection([{ card: forgedCard, foil: true }]);
+      SFX.chase();
+      burstConfetti(80);
+      toast(`Forge Success! Forged ${forgedCard.name} (${forgedCard.rarity})!`);
+      render('forge');
+    });
+  }
 }
 
 async function renderSearch() {
@@ -1288,6 +1455,7 @@ async function renderSetDetail(setMeta){
   setDetailCardsCache = null; setDetailCardsCacheSetId = null;
   const wrap = el('div');
   const dynamicCost = setMeta.packCost || 150;
+  const boxCost = dynamicCost * 30; // 36 packs discounted to 30 pack price for Booster Box
   
   wrap.innerHTML = `
     <div class="pack-hero">
@@ -1305,7 +1473,10 @@ async function renderSetDetail(setMeta){
       </div>
 
       <div class="pack-count">10 cards per pack · ${setMeta.total} cards in ${setMeta.name}</div>
-      <button class="btn btn-primary" id="open-pack-btn" style="width:100%;">${isAdminUser() ? 'Open pack — Unlimited (Admin)' : `Open pack — ${dynamicCost} credits`}</button>
+      <div style="display:flex; gap:8px; width:100%;">
+        <button class="btn btn-primary" id="open-pack-btn" style="flex:1;">${isAdminUser() ? 'Open Pack (Admin)' : `Open Pack — ${dynamicCost} cr`}</button>
+        <button class="btn btn-secondary" id="open-box-btn" style="flex:1; border-color:var(--gold); color:var(--gold);">📦 Box (36P) — ${boxCost} cr</button>
+      </div>
       <div class="odds-box">
         <div class="row"><span>Structure</span><b>4 common · 3 uncommon · 1 reverse holo · 2 hit slots</b></div>
         <div class="row"><span>Hit-slot odds</span><b>modeled on SV-era community data</b></div>
@@ -1315,6 +1486,7 @@ async function renderSetDetail(setMeta){
   `;
   app.appendChild(wrap);
   $('#open-pack-btn').addEventListener('click', ()=> beginOpen(setMeta, dynamicCost));
+  $('#open-box-btn').addEventListener('click', ()=> beginBoosterBox(setMeta, boxCost));
   
   if(setMeta.images.logo){
     ImgCache.get(setMeta.images.logo).then(src => {
@@ -1435,9 +1607,15 @@ async function beginOpen(setMeta, packCost){
     updatePlayerStats(st => {
       st.packsOpened = (st.packsOpened || 0) + 1;
       st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : packCost);
+      if(st.quests.openPacks.current < st.quests.openPacks.target) {
+        st.quests.openPacks.current++;
+      }
       
       pack.cards.forEach(p => {
         const tId = classify(p.card.rarity).id;
+        if(tId >= 4 && st.quests.pullHit.current < st.quests.pullHit.target) {
+          st.quests.pullHit.current++;
+        }
         if(tId > (st.rarestPull.tierId ?? -1)) {
           st.rarestPull = {
             name: p.card.name,
@@ -1478,9 +1656,48 @@ async function beginOpen(setMeta, packCost){
   }finally{ 
     if(btn) { 
       btn.disabled=false; 
-      btn.textContent = isAdminUser() ? 'Open pack — Unlimited (Admin)' : `Open pack — ${packCost} credits`; 
+      btn.textContent = isAdminUser() ? 'Open Pack (Admin)' : `Open Pack — ${packCost} cr`; 
     } 
   }
+}
+
+async function beginBoosterBox(setMeta, boxCost) {
+  if(!session && !guestMode) { openAuthModal(setMeta); return; }
+  if(!isAdminUser() && currentCredits() < boxCost) { return openGetCreditsModal(true); }
+  
+  if(isAdminUser()) {
+    // Admin free
+  } else if(guestMode) {
+    const gs = getGuestState();
+    gs.credits -= boxCost;
+    setGuestState(gs);
+    $('#credit-count').textContent = gs.credits;
+  } else {
+    const { data: newBalance, error } = await sb.rpc('spend_credits', { p_amount: boxCost });
+    if(error) throw error;
+    profile.credits = newBalance;
+    $('#credit-count').textContent = newBalance;
+  }
+
+  toast('Opening Booster Box (36 Packs)...');
+  const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
+  
+  const allBoxCards = [];
+  for(let i=0; i<36; i++) {
+    const pk = generatePack(cards);
+    pk.cards.forEach(c => allBoxCards.push(c));
+  }
+
+  updatePlayerStats(st => {
+    st.packsOpened = (st.packsOpened || 0) + 36;
+    st.creditsSpent = (st.creditsSpent || 0) + (isAdminUser() ? 0 : boxCost);
+  });
+
+  persistToActiveCollection(allBoxCards);
+  burstConfetti(100);
+  SFX.chase();
+  toast('Booster Box Opened! 36 packs added to your binder!');
+  render('collection');
 }
 
 function openRevealScreen(setMeta, pack, bgUrl){
@@ -1508,24 +1725,35 @@ function openRevealScreen(setMeta, pack, bgUrl){
   let authenticPackBg = setMeta.resolvedPackArt ? `url('${ImgCache.sync(setMeta.resolvedPackArt)}')` : '';
   
   intro.innerHTML = `
-    <div class="pack-art ${setMeta.resolvedPackArt ? '' : 'is-fallback'}" style="margin:0; animation:packshake 1.1s ease-in-out;">
+    <div class="pack-art ${setMeta.resolvedPackArt ? '' : 'is-fallback'}" id="rip-wrapper" style="margin:0; cursor:grab; touch-action:none;">
       <div class="pack-art-bg" style="${authenticPackBg ? `background-image:${authenticPackBg}; background-size: 100% 100%;` : 'background:linear-gradient(135deg, #1e293b, #0f172a);'}"></div>
       <div class="pack-crimp top fallback-only"></div>
       <div class="pack-crimp bottom fallback-only"></div>
       <img class="pack-art-logo fallback-only" src="${ImgCache.sync(setMeta.images.logo)}" onerror="this.style.display='none'"/>
+      <div style="position:absolute; bottom:15px; width:100%; text-align:center; font-weight:bold; color:#fff; font-size:13px; text-shadow:0 2px 4px rgba(0,0,0,0.8);">👆 Swipe or Tap to Rip Open!</div>
     </div>
   `;
   
   document.body.appendChild(intro);
-  SFX.tear();
-  vibrate([15,30,15]);
-  setTimeout(()=>{ 
-    const packArtEl = intro.querySelector('.pack-art');
-    if(packArtEl) packArtEl.style.animation = 'packrip 0.5s ease-out forwards';
+
+  let startY = 0;
+  const ripEl = intro.querySelector('#rip-wrapper');
+  
+  function triggerRip() {
+    SFX.tear();
+    vibrate([15,30,15]);
+    ripEl.style.animation = 'packrip 0.4s ease-out forwards';
     setTimeout(()=>{
       intro.remove(); document.body.appendChild(screen); boot();
-    }, 450);
-  }, 620);
+    }, 380);
+  }
+
+  ripEl.addEventListener('pointerdown', (e) => { startY = e.clientY; });
+  ripEl.addEventListener('pointerup', (e) => {
+    if(Math.abs(e.clientY - startY) > 20 || true) {
+      triggerRip();
+    }
+  });
 
   function boot(){
     const dotsWrap = $('#dots', screen);
