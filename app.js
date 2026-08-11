@@ -15,7 +15,7 @@ const CONFIG = {
   POKEMON_TCG_API_KEY: 'b1902dec-c387-4d44-b8f1-ac6205687cdc',
 
   ECONOMY: {
-    STARTING_CREDITS: 2250,
+    STARTING_CREDITS: 5000,
     GUEST_CREDITS: 2250,
     REFERRAL_BONUS: 25000,
     PREMIUM_TIERS: [
@@ -460,6 +460,7 @@ const ImgCache = {
 const Prewarm = {
   running: false,
   PROGRESS_KEY: 'prewarm_progress_v1',
+  FAIL_KEY: 'prewarm_fail_counts_v1',
   // Resolves (and permanently caches, in localStorage — not just
   // Cache Storage) the list of candidate pack-art image URLs for a
   // set, so repeat visits/prewarm passes never re-hit the GitHub API.
@@ -495,18 +496,25 @@ const Prewarm = {
   },
   async warmSet(setMeta) {
     const urls = await this.resolvePackArtUrls(setMeta);
+    let cachedAny = false;
     for (const url of urls) {
-      if (await this.yieldIfBusy()) return false; // user started something real — bail, resume later
-      if (await ImgCache.has(url)) continue;
-      await ImgCache.get(url, true).catch(() => null);
+      if (await this.yieldIfBusy()) return 'paused'; // user started something real — bail, resume later
+      if (await ImgCache.has(url)) { cachedAny = true; continue; }
+      const resolved = await ImgCache.get(url, true).catch(() => null);
+      if (resolved) cachedAny = true;
     }
     if (setMeta.images.symbol && !(await ImgCache.has(setMeta.images.symbol))) {
       await ImgCache.get(setMeta.images.symbol, true).catch(() => null);
     }
-    if (setMeta.images.logo && !(await ImgCache.has(setMeta.images.logo))) {
-      await ImgCache.get(setMeta.images.logo, true).catch(() => null);
+    if (setMeta.images.logo) {
+      if (await ImgCache.has(setMeta.images.logo)) cachedAny = true;
+      else if (await ImgCache.get(setMeta.images.logo, true).catch(() => null)) cachedAny = true;
     }
-    return true;
+    // 'warmed' = at least one image actually landed in Cache Storage.
+    // 'empty' = every candidate URL 404'd / failed — nothing to preload
+    // for this set (distinct from 'paused' so we don't confuse "nothing
+    // exists upstream" with "try again shortly").
+    return cachedAny ? 'warmed' : 'empty';
   },
   // Cooperative pause point: if a pack is actively being opened, let that
   // network activity go first instead of competing with it.
@@ -522,17 +530,34 @@ const Prewarm = {
     this.running = true;
     (async () => {
       let doneIds = new Set(store.get(this.PROGRESS_KEY, []));
+      let failCounts = store.get(this.FAIL_KEY, {});
       for (const setMeta of sets) {
         if (doneIds.has(setMeta.id)) continue;
         // yield to the event loop / let real UI work take priority
         await new Promise(r => (window.requestIdleCallback || setTimeout)(r, { timeout: 2000 }));
         try {
-          const finished = await this.warmSet(setMeta);
-          if (finished) {
+          const result = await this.warmSet(setMeta);
+          if (result === 'warmed') {
             doneIds.add(setMeta.id);
             store.set(this.PROGRESS_KEY, [...doneIds]);
+            delete failCounts[setMeta.id];
+            store.set(this.FAIL_KEY, failCounts);
+          } else if (result === 'empty') {
+            // Every URL failed this pass — could be a transient GitHub
+            // rate-limit/network blip, or this set genuinely has no art
+            // upstream. Retry a few times across sessions before giving
+            // up, so we don't hammer it forever but also don't write off
+            // a set permanently over one bad network moment.
+            failCounts[setMeta.id] = (failCounts[setMeta.id] || 0) + 1;
+            if (failCounts[setMeta.id] >= 5) {
+              doneIds.add(setMeta.id);
+              store.set(this.PROGRESS_KEY, [...doneIds]);
+            }
+            store.set(this.FAIL_KEY, failCounts);
           }
-        } catch (e) { /* skip this set, retry next session */ }
+          // result === 'paused' → leave un-done, retried from the top
+          // next pass with no penalty.
+        } catch (e) { /* transient — retry next session */ }
         await new Promise(r => setTimeout(r, 500)); // pace ourselves — don't hammer GitHub/CDN
       }
       this.running = false;
@@ -825,6 +850,20 @@ async function onLoggedIn(){
 async function loadProfile(attempt=1){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if(error){
+    // PGRST116 = "0 rows" from .single() — this account has no profiles
+    // row yet (e.g. first-ever login, and nothing server-side provisioned
+    // one). Self-heal by creating it here instead of leaving `profile`
+    // null forever.
+    if(error.code === 'PGRST116' && attempt === 1){
+      const { error: insertErr } = await sb.from('profiles').insert({
+        id: session.user.id,
+        credits: CONFIG.ECONOMY.STARTING_CREDITS,
+      });
+      if(!insertErr) return loadProfile(attempt+1);
+      console.error('loadProfile: could not provision new profile row:', insertErr);
+      // Falls through to the retry/give-up logic below (e.g. an RLS
+      // policy is blocking self-insert — needs a server-side fix).
+    }
     console.error('loadProfile failed:', error);
     if(attempt < 3){
       await new Promise(r=>setTimeout(r, attempt*1000));
@@ -2325,4 +2364,3 @@ function openGetCreditsModal(lowBalance=false){
    Boot
    ============================================================ */
 initAuth();
-        
