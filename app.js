@@ -294,8 +294,6 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
 };
 
-
-
 /* ============================================================
    Player Statistics Store
    ============================================================ */
@@ -488,24 +486,6 @@ const ImgCache = {
 
 /* ============================================================
    Niche pack-art sources (Bulbapedia / Pokéllector)
-   ------------------------------------------------------------
-   The GitHub asset repo (1niceroli/ptcg-assets) only has photography
-   for mainline sets. Small/promotional releases — EX Emerald, every
-   yearly McDonald's Collection, POP series, Southern Islands, etc. —
-   never have a packshot there and usually don't even have a usable
-   `images.logo` from the pokemontcg.io API, so they always fell back
-   to the plain gradient background.
-   No API calls here — just static, direct, hotlinkable image URLs:
-     - Bulbapedia: MediaWiki's Special:FilePath redirects straight to
-       the raw file for a known filename (no api.php, no JSON).
-     - Pokéllector: every set has a stable, direct set-logo image at
-       den-media.pokellector.com/logos/<Slug>.logo.<id>.png.
-   Both are tried as extra candidates in resolvePackArtUrls, and once
-   one succeeds it's cached the same as any other pack-art URL (Cache
-   Storage via ImgCache + the permanent packart_urls_v1_* localStorage
-   entry), so this lookup only ever has to succeed once per set.
-   To add coverage for another set that keeps failing: normalize its
-   pokemontcg.io `name` with normPackName() and add that key below.
    ============================================================ */
 function normPackName(name) {
   return String(name || '')
@@ -574,10 +554,6 @@ const NICHE_PACK_ART = {
   perfectorder: [pokellector('Perfect-Order.logo.429.png')],
   rebelclash: [pokellector('Rebel-Clash.logo.292.png')],
 };
-// Fallback for McDonald's sets whose exact promo-year name doesn't hit
-// the map above verbatim (regional variants, "Match Battle" re-namings,
-// etc.) — extract a 4-digit year and retry, e.g. "McDonald's Collection
-// 2013 — Black & White" -> mcdonaldscollection2013.
 function nicheArtFor(setMeta) {
   const key = normPackName(setMeta.name);
   if (NICHE_PACK_ART[key]) return NICHE_PACK_ART[key];
@@ -592,17 +568,6 @@ function nicheArtFor(setMeta) {
 
 /* ============================================================
    OWN_PACK_ART — real photographed booster packs from our own repo
-   ------------------------------------------------------------
-   These are known-good, verified-by-eye matches (filename -> real
-   set). This is the fastest and most reliable source there is: no
-   GitHub directory listing call, no TCGdex fetch, no guessed URLs
-   that may 404 — just a direct, confirmed link straight to Cache
-   Storage/the service worker, which then never re-fetches it again.
-   resolvePackArtUrls checks this FIRST and, when present, skips
-   every other lookup entirely (see below) — that's the biggest
-   single win for "less loading, remember it forever."
-   Filled in incrementally as packs get identified in batches; keys
-   are pokemontcg.io set ids (setMeta.id).
    ============================================================ */
 const PACK_ART_REPO_BASE = 'https://raw.githubusercontent.com/imnotanaiaccount/chasecard/main/';
 const OWN_PACK_ART = {
@@ -637,9 +602,6 @@ const OWN_PACK_ART = {
   ex14:  ['pack_029_1.png'], // EX Crystal Guardians
   ex15:  ['pack_030_1.png'], // EX Dragon Frontiers
   ex16:  ['pack_031_1.png'], // EX Power Keepers
-  // pack_032/033 are POP Series 1 / POP Series 6 promo packs (real
-  // photos!) rather than main sets — not wired in yet, left for the
-  // niche-art path since these aren't part of getSets()'s main rotation.
   dp1:   ['pack_034_1.png'], // Diamond & Pearl
   dp2:   ['pack_035_1.png'], // Mysterious Treasures
   dp3:   ['pack_036_1.png'], // Secret Wonders
@@ -686,7 +648,7 @@ const OWN_PACK_ART = {
   sm2:   ['pack_077_1.png'], // Guardians Rising
   sm3:   ['pack_078_1.png'], // Burning Shadows
   sm35:  ['pack_079_1.png'], // Shining Legends
-  sm4:   ['pack_080_1.png'], // Crimson Invasion (was mistakenly filed as sm7 — corrected)
+  sm4:   ['pack_080_1.png'], // Crimson Invasion
   sm5:   ['pack_081_1.png'], // Ultra Prism
   sm6:   ['pack_082_1.png'], // Forbidden Light
   sm7:   ['pack_083_1.png'], // Celestial Storm
@@ -715,7 +677,6 @@ const OWN_PACK_ART = {
   swsh11:['pack_106_3.png'], // Lost Origin
   swsh12:['pack_107_3.png'], // Silver Tempest
   swsh12pt5:['pack_108_2.png'], // Crown Zenith
-  // pack_109 is a "Trade & Play Day Kit" promo, not a main set — skipped.
   sv1:   ['pack_110_1.png'], // Scarlet & Violet
   sv2:   ['pack_111_3.png'], // Paldea Evolved
   sv3:   ['pack_112_3.png'], // Obsidian Flames
@@ -730,14 +691,6 @@ const OWN_PACK_ART = {
   sv9:   ['pack_121_2.png'], // Prismatic Evolutions
   sv10:  ['pack_122_10.png'], // Journey Together
   sv11:  ['pack_123_10.png'], // Destined Rivals
-  // pack_124 (Black Bolt) and the whole "Mega Evolution" sub-series
-  // (pack_125-130+) are 2025/2026 releases too new for a confirmed
-  // pokemontcg.io id — matched by name instead, see OWN_PACK_ART_BY_NAME.
-  // Set-id column is the standard pokemontcg.io scheme for this era —
-  // matches base1/base2/base3 confirmed live, so treated as reliable,
-  // but not re-verified against the live API for every row above.
-  // pack_131 onward, and the whole ~pack_150-207 Japanese block, are
-  // still being identified.
 };
 function ownArtFor(setMeta) {
   if (setMeta.id && setMeta.id.startsWith('jp-')) {
@@ -752,12 +705,7 @@ function ownArtFor(setMeta) {
   if (byName && byName.length) return byName.map(f => PACK_ART_REPO_BASE + f);
   return [];
 }
-// Japanese packs, keyed by the real TCGdex set id (shared across
-// languages — e.g. "base1" is Base Set in both /en/ and /ja/). IDs
-// below are our best inference from JP TCGdex set-list ordering/
-// naming conventions, NOT yet confirmed against the live API (unlike
-// the English ids above, which were verified live) — if a JP set's
-// pack art doesn't show up, this is the first place to check.
+// Japanese packs
 const OWN_PACK_ART_JP = {
   PMCG1: ['pack_143_1.png'], // 拡張パック — Japanese Base Set
   PMCG5: ['pack_144_2.png'], // リーダーズスタジアム — Leaders' Stadium
@@ -804,55 +752,40 @@ const OWN_PACK_ART_JP = {
   sv11W: ['pack_204_1.png'], // ホワイトフレア — White Flare
   M1L:   ['pack_205_1.png'], // メガブレイブ — Mega Brave
   M2a:   ['pack_206_1.png'], // MEGAドリームex
-  // pack_207 (Storm Emerald, labeled "M6" on the pack) isn't in the set
-  // list the user pasted — likely added to TCGdex after that snapshot.
-  // Left unmapped rather than guessed; every other pack (143-206) has
-  // now been identified.
 };
+
 // Fallback for sets too new to have a confirmed pokemontcg.io id yet
-// (matched by normalized set name instead — same normPackName() used
-// by the niche-art lookup, so casing/spacing/punctuation don't matter).
 const OWN_PACK_ART_BY_NAME = {
   [normPackName('Black Bolt')]: ['pack_124_1.png'],
   [normPackName('Mega Evolution')]: ['pack_125_1.png', 'pack_125_2.png', 'pack_125_3.png', 'pack_125_4.png'],
+  
+  // Fallbacks mapped to both the full series name and the short name
   [normPackName('Mega Evolution Phantasmal Flames')]: ['pack_126_1.png'],
+  [normPackName('Phantasmal Flames')]: ['pack_126_1.png'],
+  
   [normPackName('Mega Evolution Ascended Heroes')]: ['pack_127_1.png'],
+  [normPackName('Ascended Heroes')]: ['pack_127_1.png'],
+  
   [normPackName('Mega Evolution Perfect Order')]: ['pack_128_3.png'],
+  [normPackName('Perfect Order')]: ['pack_128_3.png'],
+  
   [normPackName('Mega Evolution Chaos Rising')]: ['pack_129_1.png'],
+  [normPackName('Chaos Rising')]: ['pack_129_1.png'],
+  
   [normPackName('Mega Evolution Pitch Black')]: ['pack_130_1.png'],
+  [normPackName('Pitch Black')]: ['pack_130_1.png'],
+  
   [normPackName('30th Celebration')]: ['pack_131_1.png'],
-  // pack_132-144 are mostly "Play! Pokémon Prize Pack" event promos
-  // (Series 1-5+, marked "Not for resale") plus a starter-Pokémon promo
-  // pack — none of these map to real sets in getSets(), skipped on
-  // purpose. pack_145 onward is the Japanese-language block (starts
-  // around Japanese "Neo" era) — not yet identified.
 };
 
 /* ============================================================
    TCGdex — algorithmic set-logo fallback
-   ------------------------------------------------------------
-   NICHE_PACK_ART above is a hand-maintained map: it only covers
-   sets someone manually looked up, so anything released after the
-   last edit (or any small/regional set nobody added yet) silently
-   falls through to a plain gradient. TCGdex (api.tcgdex.net) is a
-   free, no-key, actively-maintained Pokémon TCG API that carries an
-   official logo for essentially every set, including ones brand new
-   or missing/blank in pokemontcg.io's own `images.logo` field.
-   Rather than hand-map hundreds of set IDs (TCGdex's IDs don't match
-   pokemontcg.io's), we fetch the full TCGdex set list ONCE, cache it
-   forever in localStorage, and match by normalized set name — the
-   same normPackName() used for the Bulbapedia/Pokéllector map above.
-   This means new sets get covered automatically with zero code
-   changes going forward.
    ============================================================ */
 const TCGDEX_SETS_URL = 'https://api.tcgdex.net/v2/en/sets';
 const TCGDEX_INDEX_KEY = 'tcgdex_set_index_v1';
 let _tcgdexIndexPromise = null;
 async function getTcgdexSetIndex() {
   const cached = store.get(TCGDEX_INDEX_KEY);
-  // Refresh at most every 14 days — new sets do get added over time,
-  // but this list otherwise barely changes and we don't want every
-  // cold start hitting the network for it.
   if (cached && cached.map && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 14) {
     return cached.map;
   }
@@ -866,15 +799,11 @@ async function getTcgdexSetIndex() {
       for (const s of list) {
         if (!s || !s.name || !s.logo) continue;
         const key = normPackName(s.name);
-        // First one wins for a given normalized name (list order is
-        // stable/chronological from the API, so this is deterministic).
         if (!map[key]) map[key] = s.logo + '.png';
       }
       store.set(TCGDEX_INDEX_KEY, { t: Date.now(), map });
       return map;
     } catch (e) {
-      // Offline / TCGdex down — fall back to whatever we cached before
-      // (even if stale), or an empty map so callers just skip this source.
       return (cached && cached.map) || {};
     } finally {
       _tcgdexIndexPromise = null;
@@ -882,9 +811,6 @@ async function getTcgdexSetIndex() {
   })();
   return _tcgdexIndexPromise;
 }
-// A few sets are named differently enough between pokemontcg.io and
-// TCGdex that the plain normalized-name match misses — add exceptions
-// here as normPackName(pokemontcgio-name) -> normPackName(tcgdex-name).
 const TCGDEX_NAME_ALIASES = {
   wizardsblackstarpromos: 'wizardsofthecoastpromos',
 };
@@ -899,101 +825,67 @@ async function tcgdexLogoFor(setMeta) {
 
 /* ============================================================
    Background pack-art prewarmer
-   Keeps every set's pack art + logo/symbol warm in Cache Storage
-   at all times, so opening a set's detail screen never waits on
-   a GitHub lookup or an image download — it's already local.
-   Runs quietly whenever the app is open (home, collection, any
-   screen), paces itself to be idle-priority, and remembers its
-   progress across sessions so it never redoes finished sets.
-   Nothing here is ever evicted — it only stops caching a set once
-   that set is fully warm, and the cache itself is never cleared.
    ============================================================ */
 const Prewarm = {
   running: false,
   PROGRESS_KEY: 'prewarm_progress_v3',
   FAIL_KEY: 'prewarm_fail_counts_v3',
-  // Resolves (and permanently caches, in localStorage — not just
-  // Cache Storage) the list of candidate pack-art image URLs for a
-  // set, so repeat visits/prewarm passes never re-hit the GitHub API.
-  // How long a resolved URL list is trusted before we re-check GitHub.
-  // Previously this cached forever, which meant any set resolved once
-  // (e.g. before new images were added to the repo) could never pick up
-  // better/newer art without a manual localStorage wipe.
   ART_TTL_MS: 1000 * 60 * 60 * 24 * 3, // 3 days
+  
   async resolvePackArtUrls(setMeta) {
-    // Own confirmed photos win outright and skip every other lookup —
-    // no GitHub listing call, no TCGdex fetch, no localStorage TTL to
-    // worry about (a verified real photo never goes stale). This is
-    // the "no unnecessary loading" fast path.
     const own = ownArtFor(setMeta);
     if (own.length) return own;
 
-    // Japanese sets already carry a real TCGdex logo URL from getJPSets()
-    // — the GitHub/niche/guess pipeline below is English-only and would
-    // waste calls on a JP id, so use the logo directly and stop there.
-    if (setMeta.id && setMeta.id.startsWith('jp-')) {
-      return setMeta.images?.logo ? [setMeta.images.logo] : [];
-    }
-
-    const cacheKey = 'packart_urls_v4_' + setMeta.id; // v4: was permanent, now TTL'd (see ART_TTL_MS)
+    // Bumped to v5 to break any old empty caches that got stuck from the bug
+    const cacheKey = 'packart_urls_v5_' + setMeta.id; 
     const cached = store.get(cacheKey);
     if (cached && Array.isArray(cached.urls) && cached.urls.length && (Date.now() - cached.t) < this.ART_TTL_MS) {
       return cached.urls;
     }
 
-    const idLower = setMeta.id.toLowerCase();
+    // Safely extract the real base ID (e.g. 'pmcg2' instead of 'jp-pmcg2') for the GitHub lookup
+    const realIdLower = (setMeta.tcgdexId || (setMeta.id && setMeta.id.startsWith('jp-') ? setMeta.id.slice(3) : setMeta.id)).toLowerCase();
 
-    // TCGdex logo first — one cheap indexed lookup (the underlying set
-    // list is fetched once and reused), so this resolves near-instantly
-    // and doesn't compete for GitHub's rate limit.
     let tcgdexUrl = null;
     try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline — skip */ }
+    
+    // Re-assign the Japanese logo from payload if TCGdex explicit fetch misses
+    if (!tcgdexUrl && setMeta.id && setMeta.id.startsWith('jp-') && setMeta.images?.logo) {
+      tcgdexUrl = setMeta.images.logo;
+    }
 
     let ghConfirmed = [];
     try {
-      const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`);
+      const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${realIdLower}/packshots`);
       if (ghRes.ok) {
         const files = await ghRes.json();
         const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
         images.sort((a, b) => a.name.localeCompare(b.name));
         ghConfirmed = images.map(img => img.download_url);
       }
-    } catch (e) { /* offline, CORS, or GitHub-rate-limited (60/hr unauthenticated) — fall back below */ }
+    } catch (e) { /* offline, CORS, or GitHub-rate-limited */ }
 
     const niche = nicheArtFor(setMeta);
 
     const rawUrls = [...new Set([
-      ...ghConfirmed, // real, API-confirmed photographic packshots — best when they exist
-      tcgdexUrl,      // TCGdex official set logo — reliable, near-total coverage
-      ...niche,        // Bulbapedia / Pokéllector — hand-picked photographic alternates
-      // Unverified guesses (repo may not have this exact set/path) — kept
-      // last since everything above is either confirmed or much more
-      // likely to resolve; ImgCache just skips whatever 404s.
-      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
-      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
-      setMeta.images.logo || null, // pokemontcg.io's own logo field, last resort
+      ...ghConfirmed, 
+      tcgdexUrl,      
+      ...niche,        
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${realIdLower}/packshots/1.png`,
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${realIdLower}/packshots/1.jpg`,
+      setMeta.images?.logo || null,
     ].filter(Boolean))];
 
-    // Only persist the resolved list once at least one *reliable* source
-    // (confirmed GitHub listing, TCGdex, or the hand-picked niche map)
-    // actually came back. The two raw GitHub guesses and the pokemontcg
-    // logo are always non-empty strings, so caching on "rawUrls.length"
-    // alone used to lock in a permanently art-less list any time TCGdex
-    // or GitHub had a transient hiccup (offline blip, GitHub rate limit,
-    // slow network during the initial big prewarm burst) — this was the
-    // actual cause of "big obvious sets" staying blank forever even
-    // after a source that would've worked was added. Only a genuinely
-    // confirmed source earns the permanent cache entry; anything else
-    // retries next time instead of getting stuck.
     const hasReliableSource = ghConfirmed.length > 0 || !!tcgdexUrl || niche.length > 0;
     if (rawUrls.length && hasReliableSource) store.set(cacheKey, { t: Date.now(), urls: rawUrls });
     return rawUrls;
   },
+  
   async warmSet(setMeta) {
     const urls = await this.resolvePackArtUrls(setMeta);
     let cachedAny = false;
     for (const url of urls) {
-      if (await this.yieldIfBusy()) return 'paused'; // user started something real — bail, resume later
+      if (await this.yieldIfBusy()) return 'paused'; 
       if (await ImgCache.has(url)) { cachedAny = true; continue; }
       const resolved = await ImgCache.get(url, true).catch(() => null);
       if (resolved) cachedAny = true;
@@ -1005,21 +897,15 @@ const Prewarm = {
       if (await ImgCache.has(setMeta.images.logo)) cachedAny = true;
       else if (await ImgCache.get(setMeta.images.logo, true).catch(() => null)) cachedAny = true;
     }
-    // 'warmed' = at least one image actually landed in Cache Storage.
-    // 'empty' = every candidate URL 404'd / failed — nothing to preload
-    // for this set (distinct from 'paused' so we don't confuse "nothing
-    // exists upstream" with "try again shortly").
     return cachedAny ? 'warmed' : 'empty';
   },
-  // Cooperative pause point: if a pack is actively being opened, let that
-  // network activity go first instead of competing with it.
+  
   async yieldIfBusy() {
     if (!window.__packOpenInFlight) return false;
     await new Promise(r => setTimeout(r, 1500));
     return !!window.__packOpenInFlight;
   },
-  // Fire-and-forget: call once (e.g. from renderHome). Safe to call many
-  // times — it no-ops if already running.
+  
   start(sets) {
     if (this.running || !sets || !sets.length) return;
     this.running = true;
@@ -1028,7 +914,6 @@ const Prewarm = {
       let failCounts = store.get(this.FAIL_KEY, {});
       for (const setMeta of sets) {
         if (doneIds.has(setMeta.id)) continue;
-        // yield to the event loop / let real UI work take priority
         await new Promise(r => (window.requestIdleCallback || setTimeout)(r, { timeout: 2000 }));
         try {
           const result = await this.warmSet(setMeta);
@@ -1038,11 +923,6 @@ const Prewarm = {
             delete failCounts[setMeta.id];
             store.set(this.FAIL_KEY, failCounts);
           } else if (result === 'empty') {
-            // Every URL failed this pass — could be a transient GitHub
-            // rate-limit/network blip, or this set genuinely has no art
-            // upstream. Retry a few times across sessions before giving
-            // up, so we don't hammer it forever but also don't write off
-            // a set permanently over one bad network moment.
             failCounts[setMeta.id] = (failCounts[setMeta.id] || 0) + 1;
             if (failCounts[setMeta.id] >= 5) {
               doneIds.add(setMeta.id);
@@ -1050,10 +930,8 @@ const Prewarm = {
             }
             store.set(this.FAIL_KEY, failCounts);
           }
-          // result === 'paused' → leave un-done, retried from the top
-          // next pass with no penalty.
         } catch (e) { /* transient — retry next session */ }
-        await new Promise(r => setTimeout(r, 500)); // pace ourselves — don't hammer GitHub/CDN
+        await new Promise(r => setTimeout(r, 500)); 
       }
       this.running = false;
     })();
@@ -1130,13 +1008,7 @@ function calculatePackCost(index, totalSets) {
 }
 
 /* ============================================================
-   Japanese sets — sourced from TCGdex (pokemontcg.io is English-only
-   and has no Japanese data at all). TCGdex set ids are shared across
-   languages (e.g. "base1" is Base Set in both /en/ and /ja/), so a
-   JP-market set can reuse the exact same id — real disambiguation
-   only needs the "jp-" prefix we add for OUR internal routing (set
-   detail screens, cache keys, pack-art lookups), so it never collides
-   with a pokemontcg.io English set that happens to share the id.
+   Japanese sets — sourced from TCGdex 
    ============================================================ */
 const TCGDEX_JA_SETS_URL = 'https://api.tcgdex.net/v2/ja/sets';
 async function getJPSets(){
@@ -1147,9 +1019,6 @@ async function getJPSets(){
     const res = await fetch(TCGDEX_JA_SETS_URL);
     if(!res.ok) throw new Error('tcgdex ja sets ' + res.status);
     const list = await res.json();
-    // API returns sets pre-sorted chronologically (releaseDate>localId>id) —
-    // the list endpoint doesn't include releaseDate itself, so we keep
-    // that order rather than re-sorting on a field we don't have here.
     const data = list.filter(s => s && s.id && s.name).map((s, idx) => ({
       id: 'jp-' + s.id,
       tcgdexId: s.id,
@@ -1165,7 +1034,7 @@ async function getJPSets(){
     return data;
   }catch(e){
     if(cached) return cached.data;
-    return []; // offline/unavailable — app still works, just without JP sets
+    return []; 
   }
 }
 
@@ -1218,8 +1087,6 @@ async function getSets(){
       };
     });
 
-    // Merge in Japanese sets (best-effort — if TCGdex is unreachable,
-    // getJPSets() resolves to [] and the English list still loads fine).
     const jpData = await getJPSets();
     data = data.concat(jpData);
 
@@ -1349,10 +1216,6 @@ function getGuestState(){
     s = { credits: CONFIG.ECONOMY.GUEST_CREDITS, usedFreePack: false };
     store.set('guest_state', s);
   }
-  // Sanity clamp — guards against corrupted/edited localStorage values
-  // breaking the UI (e.g. negative counts, Infinity). This cannot stop
-  // someone from editing their own browser storage — that's inherent to
-  // any client-only guest mode with no server-side account.
   const MAX_GUEST_CREDITS = 5_000_000;
   if(s.credits > MAX_GUEST_CREDITS || !Number.isFinite(s.credits)) {
     s.credits = MAX_GUEST_CREDITS;
@@ -1413,10 +1276,6 @@ async function onLoggedIn(){
 async function loadProfile(attempt=1){
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if(error){
-    // PGRST116 = "0 rows" from .single() — this account has no profiles
-    // row yet (e.g. first-ever login, and nothing server-side provisioned
-    // one). Self-heal by creating it here instead of leaving `profile`
-    // null forever.
     if(error.code === 'PGRST116' && attempt === 1){
       const { error: insertErr } = await sb.from('profiles').insert({
         id: session.user.id,
@@ -1424,8 +1283,6 @@ async function loadProfile(attempt=1){
       });
       if(!insertErr) return loadProfile(attempt+1);
       console.error('loadProfile: could not provision new profile row:', insertErr);
-      // Falls through to the retry/give-up logic below (e.g. an RLS
-      // policy is blocking self-insert — needs a server-side fix).
     }
     console.error('loadProfile failed:', error);
     if(attempt < 3){
@@ -1462,9 +1319,6 @@ async function loadProfile(attempt=1){
 /* ============================================================
    Multi-Collection & Trading Helpers
    ============================================================ */
-// Collections/referral state are namespaced per logged-in user (or 'guest')
-// so that switching between different Google accounts on the same browser
-// doesn't leak one account's pack collection/state into another's.
 function scopedKey(base){
   const uid = (!guestMode && session?.user?.id) ? session.user.id : 'guest';
   return base + '__' + uid;
@@ -1473,7 +1327,6 @@ function scopedKey(base){
 function getCollectionsMap() {
   let map = store.get(scopedKey('user_collections'), null);
   if (!map || typeof map !== 'object') {
-    // one-time migration from the old unscoped key, guest sessions only
     const legacy = guestMode ? store.get('collection', null) : null;
     map = { 'Main Collection': legacy || {} };
     store.set(scopedKey('user_collections'), map);
@@ -2112,7 +1965,6 @@ async function renderHome(){
 
   setsWrap.appendChild(el('div','section-title','Choose a booster (Oldest → Newest)'));
 
-  // --- NEW TAB SYSTEM ---
   let activeHomeTab = store.get('active_home_tab') || 'pkmn_en';
   const tabsWrap = el('div');
   tabsWrap.style.cssText = 'display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding-bottom:4px; scrollbar-width: none;';
@@ -2134,7 +1986,6 @@ async function renderHome(){
     tabsWrap.appendChild(btn);
   });
   setsWrap.appendChild(tabsWrap);
-  // ----------------------
 
   const gridHolder = el('div'); gridHolder.innerHTML = `<div class="set-grid" id="set-grid"></div>`;
   setsWrap.appendChild(gridHolder.firstChild);
@@ -2152,7 +2003,6 @@ async function renderHome(){
     const allSets = await getSets();
     let displaySets = [];
 
-    // Filter sets or inject placeholders based on the active tab
     if (activeHomeTab === 'pkmn_en') {
         displaySets = allSets.filter(s => !s.id.startsWith('jp-'));
     } else if (activeHomeTab === 'pkmn_jp') {
@@ -2173,7 +2023,6 @@ async function renderHome(){
 
     grid.innerHTML = '';
     
-    // Only prewarm real API sets
     if (activeHomeTab === 'pkmn_en' || activeHomeTab === 'pkmn_jp') {
         Prewarm.start(displaySets);
     }
@@ -2183,7 +2032,6 @@ async function renderHome(){
       const card = el('div','set-card');
       const costDisplay = s.packCost || 150;
       
-      // The 1x1 transparent SVG in onerror fixes the broken icon while preserving your CSS gradient fallback
       card.innerHTML = `<img src="" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg=='" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
       
       card.addEventListener('click', ()=> {
@@ -2195,7 +2043,7 @@ async function renderHome(){
       });
       grid.appendChild(card);
 
-      if (s.isPlaceholder) return; // Skip image loading for placeholders
+      if (s.isPlaceholder) return; 
 
       const imgEl = card.querySelector('img');
       if (!imgEl) return;
@@ -2305,16 +2153,8 @@ async function renderSetDetail(setMeta){
     
     const gallery = $('#pack-gallery', wrap);
 
-    // Shared with the background prewarmer — if this set was already
-    // warmed while the user was elsewhere, both the URL list and the
-    // images themselves resolve instantly from cache with no network hit.
     const rawUrls = await Prewarm.resolvePackArtUrls(setMeta);
 
-    // One loader cycle for the whole resolution pass, not one per candidate
-    // URL — probing 4-5 candidates (several of which are expected to 404)
-    // used to flip the global loading bar on/off rapidly, which read as
-    // "confused". Individual probes stay silent; we show one status message
-    // instead once we know the outcome.
     showLoader();
     const validUrls = [];
     try {
@@ -2399,7 +2239,7 @@ async function beginOpen(setMeta, packCost, qty = 1){
   const totalCost = packCost * qty;
   if(!isAdminUser() && currentCredits() < totalCost){ return openGetCreditsModal(true); }
   const btn = $('#open-pack-btn'); if(btn) { btn.disabled = true; btn.textContent = 'Loading cards…'; }
-  window.__packOpenInFlight = true; // tell the background prewarmer to stand down while this runs
+  window.__packOpenInFlight = true;
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
 
@@ -2938,13 +2778,6 @@ async function claimShareBonus(platform, btn){
       const creditCountEl = $('#credit-count');
       if(creditCountEl) creditCountEl.textContent = gs.credits;
     } else {
-      // Re-validate the session before hitting a credit-granting RPC.
-      // Switching between several Google accounts in the same browser
-      // can leave the in-memory `session`/`profile` pointed at a stale
-      // account for a moment (the auth listener fires async) — refreshing
-      // here and re-pulling the profile for whichever account is
-      // *actually* current avoids spurious "could not claim" failures
-      // and, worse, crediting the wrong account.
       const { data: sessData } = await sb.auth.getSession();
       session = sessData.session;
       if(!session){ throw new Error('signed_out'); }
