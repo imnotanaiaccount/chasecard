@@ -447,6 +447,100 @@ const ImgCache = {
 };
 
 /* ============================================================
+   Niche pack-art sources (Bulbapedia / Pokéllector)
+   ------------------------------------------------------------
+   The GitHub asset repo (1niceroli/ptcg-assets) only has photography
+   for mainline sets. Small/promotional releases — EX Emerald, every
+   yearly McDonald's Collection, POP series, Southern Islands, etc. —
+   never have a packshot there and usually don't even have a usable
+   `images.logo` from the pokemontcg.io API, so they always fell back
+   to the plain gradient background.
+   No API calls here — just static, direct, hotlinkable image URLs:
+     - Bulbapedia: MediaWiki's Special:FilePath redirects straight to
+       the raw file for a known filename (no api.php, no JSON).
+     - Pokéllector: every set has a stable, direct set-logo image at
+       den-media.pokellector.com/logos/<Slug>.logo.<id>.png.
+   Both are tried as extra candidates in resolvePackArtUrls, and once
+   one succeeds it's cached the same as any other pack-art URL (Cache
+   Storage via ImgCache + the permanent packart_urls_v1_* localStorage
+   entry), so this lookup only ever has to succeed once per set.
+   To add coverage for another set that keeps failing: normalize its
+   pokemontcg.io `name` with normPackName() and add that key below.
+   ============================================================ */
+function normPackName(name) {
+  return String(name || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+function bulbapediaFile(filename) {
+  return 'https://archives.bulbagarden.net/wiki/Special:FilePath/' + encodeURIComponent(filename);
+}
+function pokellector(slugDotIdDotPng) {
+  return 'https://den-media.pokellector.com/logos/' + slugDotIdDotPng;
+}
+// Keys are normPackName(setMeta.name) — verified real URLs only.
+const NICHE_PACK_ART = {
+  exemerald: [
+    bulbapediaFile('EX9_Booster_Kyogre.jpg'),
+    bulbapediaFile('EX9_Booster_Groudon.jpg'),
+    bulbapediaFile('EX9_Booster_Rayquaza.jpg'),
+    bulbapediaFile('EX9_Booster_Deoxys_Speed.jpg'),
+    pokellector('EX-Emerald.logo.60.png'),
+  ],
+  mcdonaldscollection2011: [pokellector('McDonalds-Promos-2011.logo.10.png')],
+  mcdonaldscollection2012: [pokellector('McDonalds-Promos-2012.logo.11.png')],
+  mcdonaldscollection2013: [pokellector('McDonalds-Promos-2013.logo.147.png')],
+  mcdonaldscollection2014: [pokellector('McDonalds-Collection-2014.logo.158.png')],
+  mcdonaldscollection2015: [pokellector('McDonalds-Collection-2015.logo.182.png')],
+  mcdonaldscollection2016: [pokellector('McDonalds-Collection-2016.logo.207.png')],
+  mcdonaldscollection2017: [pokellector('McDonalds-Collection-2017.logo.230.png')],
+  mcdonaldscollection2018: [pokellector('McDonalds-Collection-2018.logo.265.png')],
+  mcdonaldscollection2019: [pokellector('McDonalds-Collection-2019.logo.290.png')],
+  mcdonaldscollection2019fr: [pokellector('McDonalds-Collection-2019-FR.logo.334.png')],
+  mcdonalds25thanniversary: [pokellector('McDonalds-25th-Anniversary.logo.300.png')],
+  mcdonaldsmatchbattle: [pokellector('McDonalds-Match-Battle.logo.353.png')], // 2022
+  mcdonaldsmatchbattle2023: [pokellector('McDonalds-Match-Battle-2023.logo.372.png')],
+  mcdonaldsdragondiscovery: [pokellector('McDonalds-Dragon-Discovery.logo.410.png')], // 2024
+  southernislands: [pokellector('Southern-Islands.logo.124.png')],
+  bestofgame: [pokellector('Best-of-Game.logo.196.png')],
+  legendarycollection: [pokellector('Legendary-Collection.logo.112.png')],
+  detectivepikachu: [pokellector('Detective-Pikachu.logo.270.png')],
+  pokemongo: [pokellector('Pokemon-Go.logo.346.png')],
+  popseries1: [pokellector('POP-Series-1.logo.68.png')],
+  popseries2: [pokellector('POP-Series-2.logo.69.png')],
+  popseries3: [pokellector('POP-Series-3.logo.70.png')],
+  popseries4: [pokellector('POP-Series-4.logo.71.png')],
+  popseries5: [pokellector('POP-Series-5.logo.102.png')],
+  popseries6: [pokellector('POP-Series-6.logo.103.png')],
+  popseries7: [pokellector('POP-Series-7.logo.104.png')],
+  popseries8: [pokellector('POP-Series-8.logo.105.png')],
+  popseries9: [pokellector('POP-Series-9.logo.106.png')],
+  nintendopromos: [pokellector('Nintendo-Promos.logo.50.png')],
+  dragonvault: [pokellector('Dragon-Vault.logo.8.png')],
+  radiantcollection: [pokellector('Radiant-Collection.logo.148.png')],
+  kalosstarterset: [pokellector('Kalos-Starter-Set.logo.150.png')],
+  doublecrisis: [pokellector('Double-Crisis.logo.172.png')],
+  callsoflegends: [pokellector('Call-of-Legends.logo.33.png')],
+  pokemonrumble: [pokellector('Pokemon-Rumble.logo.52.png')],
+};
+// Fallback for McDonald's sets whose exact promo-year name doesn't hit
+// the map above verbatim (regional variants, "Match Battle" re-namings,
+// etc.) — extract a 4-digit year and retry, e.g. "McDonald's Collection
+// 2013 — Black & White" -> mcdonaldscollection2013.
+function nicheArtFor(setMeta) {
+  const key = normPackName(setMeta.name);
+  if (NICHE_PACK_ART[key]) return NICHE_PACK_ART[key];
+  if (/mcdonald/i.test(setMeta.name || '')) {
+    const yearMatch = String(setMeta.name).match(/20\d{2}/);
+    if (yearMatch && NICHE_PACK_ART['mcdonaldscollection' + yearMatch[0]]) {
+      return NICHE_PACK_ART['mcdonaldscollection' + yearMatch[0]];
+    }
+  }
+  return [];
+}
+
+/* ============================================================
    Background pack-art prewarmer
    Keeps every set's pack art + logo/symbol warm in Cache Storage
    at all times, so opening a set's detail screen never waits on
@@ -484,6 +578,7 @@ const Prewarm = {
     rawUrls.push(
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
+      ...nicheArtFor(setMeta), // Bulbapedia / Pokéllector — covers sets the GitHub repo never has
       setMeta.images.logo || null
     );
     rawUrls = [...new Set(rawUrls.filter(Boolean))];
