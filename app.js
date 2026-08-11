@@ -216,9 +216,7 @@ customStyles.innerHTML = `
   100% { left: 100%; }
 }
 
-/* Larger, sharper pack-art thumbnails on the home overview grid.
-   !important + higher specificity so this wins over whatever base
-   grid/card sizing is defined in the main stylesheet. */
+/* Larger, sharper pack-art thumbnails on the home overview grid */
 #set-grid.set-grid {
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
   gap: 14px !important;
@@ -232,11 +230,6 @@ customStyles.innerHTML = `
 .set-card img {
   width: 100% !important;
   height: 150px !important;
-  /* contain, not cover: candidates mix tall pack-shot photos with wide
-     official set logos (TCGdex, pokemontcg.io) — cover crops the wide
-     ones into a cropped, half-legible mess. Contain always shows the
-     whole image, letterboxed on a matching gradient so it still reads
-     as a deliberate card rather than empty space. */
   object-fit: contain !important;
   object-position: center !important;
   box-sizing: border-box !important;
@@ -332,7 +325,7 @@ function checkDailyStreak() {
 checkDailyStreak();
 
 /* ============================================================
-   Card Market Valuation & 70% Sell-Back System (Virtual Currency Only)
+   Card Market Valuation & 70% Sell-Back System
    ============================================================ */
 const RARITY_ESTIMATED_VALUES = {
   0: 0.15,   // Common
@@ -433,9 +426,6 @@ function sellCardFromCollection(cardObj, creditsEarned) {
 const ImgCache = {
   blobUrls: {},
   CACHE_NAME: 'chasecards-universal-images-v16',
-  // True if this url is already available (in-memory blob or on-disk Cache
-  // Storage) without touching the network. Used by the background prewarmer
-  // to skip work it's already done.
   async has(url) {
     if (!url) return false;
     if (this.blobUrls[url]) return true;
@@ -445,8 +435,6 @@ const ImgCache = {
       return !!(await cache.match(url));
     } catch (e) { return false; }
   },
-  // silent=true skips the global loader spinner — used for background
-  // prewarming so it doesn't flicker the UI while the user is elsewhere.
   async get(url, silent = false) {
     if (!url) return '';
     if (this.blobUrls[url]) return this.blobUrls[url];
@@ -489,7 +477,7 @@ const ImgCache = {
    ============================================================ */
 function normPackName(name) {
   return String(name || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 }
@@ -499,7 +487,6 @@ function bulbapediaFile(filename) {
 function pokellector(slugDotIdDotPng) {
   return 'https://den-media.pokellector.com/logos/' + slugDotIdDotPng;
 }
-// Keys are normPackName(setMeta.name) — verified real URLs only.
 const NICHE_PACK_ART = {
   exemerald: [
     bulbapediaFile('EX9_Booster_Kyogre.jpg'),
@@ -519,9 +506,9 @@ const NICHE_PACK_ART = {
   mcdonaldscollection2019: [pokellector('McDonalds-Collection-2019.logo.290.png')],
   mcdonaldscollection2019fr: [pokellector('McDonalds-Collection-2019-FR.logo.334.png')],
   mcdonalds25thanniversary: [pokellector('McDonalds-25th-Anniversary.logo.300.png')],
-  mcdonaldsmatchbattle: [pokellector('McDonalds-Match-Battle.logo.353.png')], // 2022
+  mcdonaldsmatchbattle: [pokellector('McDonalds-Match-Battle.logo.353.png')],
   mcdonaldsmatchbattle2023: [pokellector('McDonalds-Match-Battle-2023.logo.372.png')],
-  mcdonaldsdragondiscovery: [pokellector('McDonalds-Dragon-Discovery.logo.410.png')], // 2024
+  mcdonaldsdragondiscovery: [pokellector('McDonalds-Dragon-Discovery.logo.410.png')],
   southernislands: [pokellector('Southern-Islands.logo.124.png')],
   bestofgame: [pokellector('Best-of-Game.logo.196.png')],
   legendarycollection: [pokellector('Legendary-Collection.logo.112.png')],
@@ -567,136 +554,143 @@ function nicheArtFor(setMeta) {
 }
 
 /* ============================================================
-   OWN_PACK_ART — real photographed booster packs from our own repo
+   OWN_PACK_ART — real photographed booster packs from repo
    ============================================================ */
 const PACK_ART_REPO_BASE = 'https://raw.githubusercontent.com/imnotanaiaccount/chasecard/main/';
 const OWN_PACK_ART = {
-  base1: ['pack_001_1.png', 'pack_001_2.png', 'pack_001_3.png'], // Base Set
-  base2: ['pack_002_1.png', 'pack_002_2.png', 'pack_002_4.png'], // Jungle
-  base3: ['pack_003_1.png', 'pack_003_4.png', 'pack_003_5.png'], // Fossil
-  base4: ['pack_004_1.png'], // Base Set 2
-  base5: ['pack_005_1.png'], // Team Rocket
-  gym1:  ['pack_006_1.png'], // Gym Heroes
-  gym2:  ['pack_007_1.png'], // Gym Challenge
-  base6: ['pack_008_2.png', 'pack_008_5.png', 'pack_008_6.png', 'pack_008_8.png'], // Legendary Collection
-  neo1:  ['pack_009_2.png', 'pack_009_3.png', 'pack_009_4.png', 'pack_009_6.png'], // Neo Genesis
-  neo2:  ['pack_010_1.png'], // Neo Discovery
-  neo3:  ['pack_011_1.png'], // Neo Revelation
-  neo4:  ['pack_012_1.png'], // Neo Destiny
-  ecard1:['pack_013_2.png'], // Expedition Base Set
-  ecard2:['pack_014_1.png'], // Aquapolis
-  ecard3:['pack_015_1.png'], // Skyridge
-  ex1:   ['pack_016_1.png'], // EX Ruby & Sapphire
-  ex2:   ['pack_017_1.png'], // EX Sandstorm
-  ex3:   ['pack_018_1.png'], // EX Dragon
-  ex4:   ['pack_019_1.png'], // EX Team Magma vs Team Aqua
-  ex5:   ['pack_020_2.png'], // EX Hidden Legends
-  ex6:   ['pack_021_1.png'], // EX FireRed & LeafGreen
-  ex7:   ['pack_022_2.png'], // EX Team Rocket Returns
-  ex8:   ['pack_023_2.png'], // EX Deoxys
-  ex9:   ['pack_024_1.png'], // EX Emerald
-  ex10:  ['pack_025_1.png'], // EX Unseen Forces
-  ex11:  ['pack_026_1.png'], // EX Delta Species
-  ex12:  ['pack_027_2.png'], // EX Legend Maker
-  ex13:  ['pack_028_10.png'], // EX Holon Phantoms
-  ex14:  ['pack_029_1.png'], // EX Crystal Guardians
-  ex15:  ['pack_030_1.png'], // EX Dragon Frontiers
-  ex16:  ['pack_031_1.png'], // EX Power Keepers
-  dp1:   ['pack_034_1.png'], // Diamond & Pearl
-  dp2:   ['pack_035_1.png'], // Mysterious Treasures
-  dp3:   ['pack_036_1.png'], // Secret Wonders
-  dp4:   ['pack_037_1.png'], // Great Encounters
-  dp5:   ['pack_038_1.png'], // Majestic Dawn
-  dp6:   ['pack_039_1.png'], // Legends Awakened
-  dp7:   ['pack_040_1.png'], // Stormfront
-  pl1:   ['pack_041_1.png'], // Platinum
-  pl2:   ['pack_042_1.png'], // Rising Rivals
-  pl3:   ['pack_043_1.png'], // Supreme Victors
-  pl4:   ['pack_044_1.png'], // Arceus
-  hgss1: ['pack_045_1.png'], // HeartGold & SoulSilver
-  hgss2: ['pack_046_1.png'], // HS Unleashed
-  hgss3: ['pack_047_1.png'], // HS Undaunted
-  hgss4: ['pack_048_1.png'], // HS Triumphant
-  col1:  ['pack_049_1.png'], // Call of Legends
-  bw1:   ['pack_050_11.png'], // Black & White
-  bw2:   ['pack_051_2.png'], // Emerging Powers
-  bw3:   ['pack_052_1.png'], // Noble Victories
-  bw4:   ['pack_053_1.png'], // Next Destinies
-  bw5:   ['pack_054_1.png'], // Dark Explorers
-  bw6:   ['pack_055_1.png'], // Dragons Exalted
-  dv1:   ['pack_056_1.png'], // Dragon Vault
-  bw7:   ['pack_057_1.png'], // Boundaries Crossed
-  bw8:   ['pack_058_1.png'], // Plasma Storm
-  bw9:   ['pack_059_1.png'], // Plasma Freeze
-  bw10:  ['pack_060_1.png'], // Plasma Blast
-  bw11:  ['pack_061_1.png'], // Legendary Treasures
-  xy1:   ['pack_062_1.png'], // XY
-  xy2:   ['pack_063_1.png'], // Flashfire
-  xy3:   ['pack_064_1.png'], // Furious Fists
-  xy4:   ['pack_065_1.png'], // Phantom Forces
-  xy5:   ['pack_066_1.png'], // Primal Clash
-  dc1:   ['pack_067_1.png'], // Double Crisis
-  xy6:   ['pack_068_10.png'], // Roaring Skies
-  xy7:   ['pack_069_1.png'], // Ancient Origins
-  xy8:   ['pack_070_1.png'], // BREAKthrough
-  xy9:   ['pack_071_11.png'], // BREAKpoint
-  g1:    ['pack_072_2.png'], // Generations
-  xy10:  ['pack_073_1.png'], // Fates Collide
-  xy11:  ['pack_074_10.png'], // Steam Siege
-  xy12:  ['pack_075_2.png'], // Evolutions
-  sm1:   ['pack_076_1.png'], // Sun & Moon
-  sm2:   ['pack_077_1.png'], // Guardians Rising
-  sm3:   ['pack_078_1.png'], // Burning Shadows
-  sm35:  ['pack_079_1.png'], // Shining Legends
-  sm4:   ['pack_080_1.png'], // Crimson Invasion
-  sm5:   ['pack_081_1.png'], // Ultra Prism
-  sm6:   ['pack_082_1.png'], // Forbidden Light
-  sm7:   ['pack_083_1.png'], // Celestial Storm
-  sm75:  ['pack_084_2.png'], // Dragon Majesty
-  sm8:   ['pack_085_2.png'], // Lost Thunder
-  sm9:   ['pack_086_2.png'], // Team Up
-  det1:  ['pack_087_1.png'], // Detective Pikachu
-  sm10:  ['pack_088_2.png'], // Unbroken Bonds
-  sm11:  ['pack_089_1.png'], // Unified Minds
-  sm115: ['pack_090_2.png'], // Hidden Fates
-  sm12:  ['pack_091_10.png'], // Cosmic Eclipse
-  swsh1: ['pack_092_2.png'], // Sword & Shield
-  swsh2: ['pack_093_1.png'], // Rebel Clash
-  swsh3: ['pack_094_1.png'], // Darkness Ablaze
-  swsh35:['pack_095_1.png'], // Champion's Path
-  swsh4: ['pack_096_1.png'], // Vivid Voltage
-  swsh45:['pack_097_1.png'], // Shining Fates
-  swsh5: ['pack_098_1.png'], // Battle Styles
-  swsh6: ['pack_099_2.png'], // Chilling Reign
-  swsh7: ['pack_100_2.png'], // Evolving Skies
-  cel25: ['pack_101_2.png'], // Celebrations
-  swsh8: ['pack_102_2.png'], // Fusion Strike
-  swsh9: ['pack_103_1.png'], // Brilliant Stars
-  swsh10:['pack_104_1.png'], // Astral Radiance
-  pgo:   ['pack_105_3.png'], // Pokémon GO
-  swsh11:['pack_106_3.png'], // Lost Origin
-  swsh12:['pack_107_3.png'], // Silver Tempest
-  swsh12pt5:['pack_108_2.png'], // Crown Zenith
-  sv1:   ['pack_110_1.png'], // Scarlet & Violet
-  sv2:   ['pack_111_3.png'], // Paldea Evolved
-  sv3:   ['pack_112_3.png'], // Obsidian Flames
-  sv3pt5:['pack_113_2.png'], // 151
-  sv4:   ['pack_114_2.png'], // Paradox Rift
-  sv4pt5:['pack_115_2.png'], // Paldean Fates
-  sv5:   ['pack_116_2.png'], // Temporal Forces
-  sv6:   ['pack_117_2.png'], // Twilight Masquerade
-  sv6pt5:['pack_118_3.png'], // Shrouded Fable
-  sv7:   ['pack_119_2.png'], // Stellar Crown
-  sv8:   ['pack_120_1.png'], // Surging Sparks
-  sv9:   ['pack_121_2.png'], // Prismatic Evolutions
-  sv10:  ['pack_122_10.png'], // Journey Together
-  sv11:  ['pack_123_10.png'], // Destined Rivals
+  base1: ['pack_001_1.png', 'pack_001_2.png', 'pack_001_3.png'],
+  base2: ['pack_002_1.png', 'pack_002_2.png', 'pack_002_4.png'],
+  base3: ['pack_003_1.png', 'pack_003_4.png', 'pack_003_5.png'],
+  base4: ['pack_004_1.png'],
+  base5: ['pack_005_1.png'],
+  gym1:  ['pack_006_1.png'],
+  gym2:  ['pack_007_1.png'],
+  base6: ['pack_008_2.png', 'pack_008_5.png', 'pack_008_6.png', 'pack_008_8.png'],
+  neo1:  ['pack_009_2.png', 'pack_009_3.png', 'pack_009_4.png', 'pack_009_6.png'],
+  neo2:  ['pack_010_1.png'],
+  neo3:  ['pack_011_1.png'],
+  neo4:  ['pack_012_1.png'],
+  ecard1:['pack_013_2.png'],
+  ecard2:['pack_014_1.png'],
+  ecard3:['pack_015_1.png'],
+  ex1:   ['pack_016_1.png'],
+  ex2:   ['pack_017_1.png'],
+  ex3:   ['pack_018_1.png'],
+  ex4:   ['pack_019_1.png'],
+  ex5:   ['pack_020_2.png'],
+  ex6:   ['pack_021_1.png'],
+  ex7:   ['pack_022_2.png'],
+  ex8:   ['pack_023_2.png'],
+  ex9:   ['pack_024_1.png'],
+  ex10:  ['pack_025_1.png'],
+  ex11:  ['pack_026_1.png'],
+  ex12:  ['pack_027_2.png'],
+  ex13:  ['pack_028_10.png'],
+  ex14:  ['pack_029_1.png'],
+  ex15:  ['pack_030_1.png'],
+  ex16:  ['pack_031_1.png'],
+  dp1:   ['pack_034_1.png'],
+  dp2:   ['pack_035_1.png'],
+  dp3:   ['pack_036_1.png'],
+  dp4:   ['pack_037_1.png'],
+  dp5:   ['pack_038_1.png'],
+  dp6:   ['pack_039_1.png'],
+  dp7:   ['pack_040_1.png'],
+  pl1:   ['pack_041_1.png'],
+  pl2:   ['pack_042_1.png'],
+  pl3:   ['pack_043_1.png'],
+  pl4:   ['pack_044_1.png'],
+  hgss1: ['pack_045_1.png'],
+  hgss2: ['pack_046_1.png'],
+  hgss3: ['pack_047_1.png'],
+  hgss4: ['pack_048_1.png'],
+  col1:  ['pack_049_1.png'],
+  bw1:   ['pack_050_11.png'],
+  bw2:   ['pack_051_2.png'],
+  bw3:   ['pack_052_1.png'],
+  bw4:   ['pack_053_1.png'],
+  bw5:   ['pack_054_1.png'],
+  bw6:   ['pack_055_1.png'],
+  dv1:   ['pack_056_1.png'],
+  bw7:   ['pack_057_1.png'],
+  bw8:   ['pack_058_1.png'],
+  bw9:   ['pack_059_1.png'],
+  bw10:  ['pack_060_1.png'],
+  bw11:  ['pack_061_1.png'],
+  xy1:   ['pack_062_1.png'],
+  xy2:   ['pack_063_1.png'],
+  xy3:   ['pack_064_1.png'],
+  xy4:   ['pack_065_1.png'],
+  xy5:   ['pack_066_1.png'],
+  dc1:   ['pack_067_1.png'],
+  xy6:   ['pack_068_10.png'],
+  xy7:   ['pack_069_1.png'],
+  xy8:   ['pack_070_1.png'],
+  xy9:   ['pack_071_11.png'],
+  g1:    ['pack_072_2.png'],
+  xy10:  ['pack_073_1.png'],
+  xy11:  ['pack_074_10.png'],
+  xy12:  ['pack_075_2.png'],
+  sm1:   ['pack_076_1.png'],
+  sm2:   ['pack_077_1.png'],
+  sm3:   ['pack_078_1.png'],
+  sm35:  ['pack_079_1.png'],
+  sm4:   ['pack_080_1.png'],
+  sm5:   ['pack_081_1.png'],
+  sm6:   ['pack_082_1.png'],
+  sm7:   ['pack_083_1.png'],
+  sm75:  ['pack_084_2.png'],
+  sm8:   ['pack_085_2.png'],
+  sm9:   ['pack_086_2.png'],
+  det1:  ['pack_087_1.png'],
+  sm10:  ['pack_088_2.png'],
+  sm11:  ['pack_089_1.png'],
+  sm115: ['pack_090_2.png'],
+  sm12:  ['pack_091_10.png'],
+  swsh1: ['pack_092_2.png'],
+  swsh2: ['pack_093_1.png'],
+  swsh3: ['pack_094_1.png'],
+  swsh35:['pack_095_1.png'],
+  swsh4: ['pack_096_1.png'],
+  swsh45:['pack_097_1.png'],
+  swsh5: ['pack_098_1.png'],
+  swsh6: ['pack_099_2.png'],
+  swsh7: ['pack_100_2.png'],
+  cel25: ['pack_101_2.png'],
+  swsh8: ['pack_102_2.png'],
+  swsh9: ['pack_103_1.png'],
+  swsh10:['pack_104_1.png'],
+  pgo:   ['pack_105_3.png'],
+  swsh11:['pack_106_3.png'],
+  swsh12:['pack_107_3.png'],
+  swsh12pt5:['pack_108_2.png'],
+  sv1:   ['pack_110_1.png'],
+  sv2:   ['pack_111_3.png'],
+  sv3:   ['pack_112_3.png'],
+  sv3pt5:['pack_113_2.png'],
+  sv4:   ['pack_114_2.png'],
+  sv4pt5:['pack_115_2.png'],
+  sv5:   ['pack_116_2.png'],
+  sv6:   ['pack_117_2.png'],
+  sv6pt5:['pack_118_3.png'],
+  sv7:   ['pack_119_2.png'],
+  sv8:   ['pack_120_1.png'],
+  sv8pt5:['pack_121_2.png'], // Prismatic Evolutions
+  sv9:   ['pack_121_2.png'],
+  sv10:  ['pack_122_10.png'],
+  sv11:  ['pack_123_10.png'],
 };
+
+// Case-insensitive Japanese matching function
 function ownArtFor(setMeta) {
   if (setMeta.id && setMeta.id.startsWith('jp-')) {
-    const realId = setMeta.tcgdexId || setMeta.id.slice(3);
-    const jpFiles = OWN_PACK_ART_JP[realId];
-    if (jpFiles && jpFiles.length) return jpFiles.map(f => PACK_ART_REPO_BASE + f);
+    const realId = (setMeta.tcgdexId || setMeta.id.slice(3)).toLowerCase();
+    const jpKeys = Object.keys(OWN_PACK_ART_JP);
+    const matchedKey = jpKeys.find(k => k.toLowerCase() === realId);
+    if (matchedKey) {
+      const jpFiles = OWN_PACK_ART_JP[matchedKey];
+      if (jpFiles && jpFiles.length) return jpFiles.map(f => PACK_ART_REPO_BASE + f);
+    }
     return [];
   }
   const files = OWN_PACK_ART[setMeta.id];
@@ -705,76 +699,70 @@ function ownArtFor(setMeta) {
   if (byName && byName.length) return byName.map(f => PACK_ART_REPO_BASE + f);
   return [];
 }
-// Japanese packs
+
 const OWN_PACK_ART_JP = {
-  PMCG1: ['pack_143_1.png'], // 拡張パック — Japanese Base Set
-  PMCG5: ['pack_144_2.png'], // リーダーズスタジアム — Leaders' Stadium
-  neo1:  ['pack_145_1.png'], // 金、銀、新世界へ... — Neo Genesis
-  VS1:   ['pack_146_3.png'], // ポケモンカード★VS — VS series
-  ADV1:  ['pack_156_1.png'], // 第1弾拡張パック — ADV expansion #1
-  ADV5:  ['pack_157_1.png'], // とかれた封印 — Unsealed
-  PCG1:  ['pack_158_2.png'], // 伝説の飛翔 — Legendary Flight
-  PCG8:  ['pack_159_10.png'], // きせきの結晶 — Crystal of Miracles
-  PCG9:  ['pack_160_1.png'], // さいはての攻防
-  L1a:   ['pack_166_2.png'], // ハートゴールドコレクション — HeartGold Collection
-  LL:    ['pack_167_1.png'], // 強化パック ロストリンク — Lost Link
-  S1H:   ['pack_168_1.png'], // BW シールド — Black/White "Shield" side
-  XY1a:  ['pack_173_1.png'], // XY1 Xerneas — コレクションX
-  XY3:   ['pack_174_3.png'], // XY3 ライジングフィスト
-  CP1:   ['pack_175_3.png'], // マグマ団VSアクア団 ダブルクライシス
-  CP2:   ['pack_176_2.png'], // 伝説キラコレクション
-  XY9:   ['pack_177_3.png'], // 破天の怒り
-  XY11a: ['pack_178_2.png'], // 爆熱の闘士
-  SM1S:  ['pack_180_2.png'], // コレクションサン
-  SM2L:  ['pack_181_1.png'], // アローラの月光
-  'SM3+':['pack_182_1.png'], // ひかる伝説
-  SM5S:  ['pack_183_3.png'], // ウルトラサン
-  SM6a:  ['pack_184_2.png'], // ドラゴンストーム
-  SM7b:  ['pack_185_1.png'], // フェアリーライズ
-  SM9:   ['pack_186_1.png'], // タッグボルト
-  sn10a: ['pack_187_2.png'], // ジージーエンド (id as given by TCGdex, likely their own typo for sm10a)
-  SM11a: ['pack_188_1.png'], // リミックスバウト
-  s1W:   ['pack_189_3.png'], // ソード — JP Sword launch set
-  s2a:   ['pack_190_2.png'], // 爆炎ウォーカー
-  S4:    ['pack_191_1.png'], // 仰天のボルテッカー
-  s5a:   ['pack_192_3.png'], // 双璧のファイター
-  s6a:   ['pack_193_1.png'], // イーブイヒーローズ — Eevee Heroes
-  s8a:   ['pack_194_1.png'], // 25th アニバーサリーコレクション
-  s9a:   ['pack_195_1.png'], // バトルリージョン
-  s10b:  ['pack_196_2.png'], // Pokémon GO
-  s12a:  ['pack_197_2.png'], // VSTARユニバース
-  sv1S:  ['pack_198_1.png'], // スカーレットex
-  sv2P:  ['pack_199_3.png'], // スノーハザード
-  sv4K:  ['pack_200_2.png'], // 古代の咆哮
-  sv5M:  ['pack_201_1.png'], // サイバージャッジ
-  sv7:   ['pack_202_1.png'], // ステラミラクル
-  sv9:   ['pack_203_1.png'], // バトルパートナーズ
-  sv11W: ['pack_204_1.png'], // ホワイトフレア — White Flare
-  M1L:   ['pack_205_1.png'], // メガブレイブ — Mega Brave
-  M2a:   ['pack_206_1.png'], // MEGAドリームex
+  PMCG1: ['pack_143_1.png'],
+  PMCG5: ['pack_144_2.png'],
+  neo1:  ['pack_145_1.png'],
+  VS1:   ['pack_146_3.png'],
+  ADV1:  ['pack_156_1.png'],
+  ADV5:  ['pack_157_1.png'],
+  PCG1:  ['pack_158_2.png'],
+  PCG8:  ['pack_159_10.png'],
+  PCG9:  ['pack_160_1.png'],
+  L1a:   ['pack_166_2.png'],
+  LL:    ['pack_167_1.png'],
+  S1H:   ['pack_168_1.png'],
+  XY1a:  ['pack_173_1.png'],
+  XY3:   ['pack_174_3.png'],
+  CP1:   ['pack_175_3.png'],
+  CP2:   ['pack_176_2.png'],
+  XY9:   ['pack_177_3.png'],
+  XY11a: ['pack_178_2.png'],
+  SM1S:  ['pack_180_2.png'],
+  SM2L:  ['pack_181_1.png'],
+  'SM3+':['pack_182_1.png'],
+  SM5S:  ['pack_183_3.png'],
+  SM6a:  ['pack_184_2.png'],
+  SM7b:  ['pack_185_1.png'],
+  SM9:   ['pack_186_1.png'],
+  sn10a: ['pack_187_2.png'],
+  SM11a: ['pack_188_1.png'],
+  s1W:   ['pack_189_3.png'],
+  s2a:   ['pack_190_2.png'],
+  S4:    ['pack_191_1.png'],
+  s5a:   ['pack_192_3.png'],
+  s6a:   ['pack_193_1.png'],
+  s8a:   ['pack_194_1.png'],
+  s9a:   ['pack_195_1.png'],
+  s10b:  ['pack_196_2.png'],
+  s12a:  ['pack_197_2.png'],
+  sv1S:  ['pack_198_1.png'],
+  sv2P:  ['pack_199_3.png'],
+  sv4K:  ['pack_200_2.png'],
+  sv5M:  ['pack_201_1.png'],
+  sv7:   ['pack_202_1.png'],
+  sv9:   ['pack_203_1.png'],
+  sv11W: ['pack_204_1.png'],
+  M1L:   ['pack_205_1.png'],
+  M2a:   ['pack_206_1.png'],
 };
 
-// Fallback for sets too new to have a confirmed pokemontcg.io id yet
 const OWN_PACK_ART_BY_NAME = {
   [normPackName('Black Bolt')]: ['pack_124_1.png'],
+  [normPackName('White Flare')]: ['pack_204_1.png'],
+  [normPackName('Prismatic Evolutions')]: ['pack_121_2.png'],
   [normPackName('Mega Evolution')]: ['pack_125_1.png', 'pack_125_2.png', 'pack_125_3.png', 'pack_125_4.png'],
-  
-  // Fallbacks mapped to both the full series name and the short name
   [normPackName('Mega Evolution Phantasmal Flames')]: ['pack_126_1.png'],
   [normPackName('Phantasmal Flames')]: ['pack_126_1.png'],
-  
   [normPackName('Mega Evolution Ascended Heroes')]: ['pack_127_1.png'],
   [normPackName('Ascended Heroes')]: ['pack_127_1.png'],
-  
   [normPackName('Mega Evolution Perfect Order')]: ['pack_128_3.png'],
   [normPackName('Perfect Order')]: ['pack_128_3.png'],
-  
   [normPackName('Mega Evolution Chaos Rising')]: ['pack_129_1.png'],
   [normPackName('Chaos Rising')]: ['pack_129_1.png'],
-  
   [normPackName('Mega Evolution Pitch Black')]: ['pack_130_1.png'],
   [normPackName('Pitch Black')]: ['pack_130_1.png'],
-  
   [normPackName('30th Celebration')]: ['pack_131_1.png'],
 };
 
@@ -830,40 +818,49 @@ const Prewarm = {
   running: false,
   PROGRESS_KEY: 'prewarm_progress_v3',
   FAIL_KEY: 'prewarm_fail_counts_v3',
-  ART_TTL_MS: 1000 * 60 * 60 * 24 * 3, // 3 days
+  ART_TTL_MS: 1000 * 60 * 60 * 24 * 3,
   
   async resolvePackArtUrls(setMeta) {
     const own = ownArtFor(setMeta);
     if (own.length) return own;
 
-    // Bumped to v5 to break any old empty caches that got stuck from the bug
-    const cacheKey = 'packart_urls_v5_' + setMeta.id; 
+    const cacheKey = 'packart_urls_v7_' + setMeta.id; 
     const cached = store.get(cacheKey);
     if (cached && Array.isArray(cached.urls) && cached.urls.length && (Date.now() - cached.t) < this.ART_TTL_MS) {
       return cached.urls;
     }
 
-    // Safely extract the real base ID (e.g. 'pmcg2' instead of 'jp-pmcg2') for the GitHub lookup
-    const realIdLower = (setMeta.tcgdexId || (setMeta.id && setMeta.id.startsWith('jp-') ? setMeta.id.slice(3) : setMeta.id)).toLowerCase();
+    const isJp = setMeta.id && setMeta.id.startsWith('jp-');
+    const realIdLower = (setMeta.tcgdexId || (isJp ? setMeta.id.slice(3) : setMeta.id)).toLowerCase();
+    
+    // Japanese sets on the GitHub repo use the 'ja_' prefix
+    const githubId = isJp ? `ja_${realIdLower}` : realIdLower;
 
     let tcgdexUrl = null;
-    try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline — skip */ }
+    try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline */ }
     
-    // Re-assign the Japanese logo from payload if TCGdex explicit fetch misses
-    if (!tcgdexUrl && setMeta.id && setMeta.id.startsWith('jp-') && setMeta.images?.logo) {
+    if (!tcgdexUrl && isJp && setMeta.images?.logo) {
       tcgdexUrl = setMeta.images.logo;
     }
 
     let ghConfirmed = [];
     try {
-      const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${realIdLower}/packshots`);
+      const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${githubId}/packshots`);
       if (ghRes.ok) {
         const files = await ghRes.json();
         const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
         images.sort((a, b) => a.name.localeCompare(b.name));
         ghConfirmed = images.map(img => img.download_url);
+      } else if (isJp) {
+        const ghResFallback = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${realIdLower}/packshots`);
+        if (ghResFallback.ok) {
+            const files = await ghResFallback.json();
+            const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
+            images.sort((a, b) => a.name.localeCompare(b.name));
+            ghConfirmed = images.map(img => img.download_url);
+        }
       }
-    } catch (e) { /* offline, CORS, or GitHub-rate-limited */ }
+    } catch (e) { /* offline */ }
 
     const niche = nicheArtFor(setMeta);
 
@@ -871,8 +868,12 @@ const Prewarm = {
       ...ghConfirmed, 
       tcgdexUrl,      
       ...niche,        
-      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${realIdLower}/packshots/1.png`,
-      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${realIdLower}/packshots/1.jpg`,
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${githubId}/packshots/1.png`,
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${githubId}/packshots/1.jpg`,
+      ...(isJp ? [
+          `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${realIdLower}/packshots/1.png`,
+          `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${realIdLower}/packshots/1.jpg`,
+      ] : []),
       setMeta.images?.logo || null,
     ].filter(Boolean))];
 
@@ -930,7 +931,7 @@ const Prewarm = {
             }
             store.set(this.FAIL_KEY, failCounts);
           }
-        } catch (e) { /* transient — retry next session */ }
+        } catch (e) { /* transient */ }
         await new Promise(r => setTimeout(r, 500)); 
       }
       this.running = false;
@@ -2032,7 +2033,7 @@ async function renderHome(){
       const card = el('div','set-card');
       const costDisplay = s.packCost || 150;
       
-      card.innerHTML = `<img src="" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg=='" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
+      card.innerHTML = `<img src="" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnQSs+'" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
       
       card.addEventListener('click', ()=> {
           if (s.isPlaceholder) {
@@ -2512,7 +2513,7 @@ function showBulkSummary(setMeta, openedPacks){
 }
 
 /* ============================================================
-   Collections View (With Clear, Rename, Delete, Export/Import)
+   Collections View
    ============================================================ */
 function renderCollection(){
   const map = getCollectionsMap();
@@ -2585,7 +2586,7 @@ function renderCollection(){
     if(!confirm(`Are you sure you want to clear all cards from collection "${activeName}"?`)) return;
     map[activeName] = {};
     store.set(scopedKey('user_collections'), map);
-        render('collection');
+    render('collection');
     toast(`Cleared all cards from "${activeName}"`);
   });
 
@@ -2658,7 +2659,7 @@ function renderCollection(){
 }
 
 /* ============================================================
-   Trading Hub — server-backed, real card-for-card trades
+   Trading Hub
    ============================================================ */
 function renderTrade(){
   const wrap = el('div');
