@@ -81,7 +81,7 @@ const CONFIG = {
         });
         self.addEventListener('fetch', e => {
           const url = new URL(e.request.url);
-          const isImage = e.request.destination === 'image' || url.pathname.match(/\\.(png|jpe?g|webp|svg|gif)$/i) || (url.hostname.includes('pokemontcg.io') && !url.pathname.startsWith('/v2/')) || url.hostname.includes('githubusercontent.com');
+          const isImage = e.request.destination === 'image' || url.pathname.match(/\\.(png|jpe?g|webp|svg|gif)$/i) || (url.hostname.includes('pokemontcg.io') && !url.pathname.startsWith('/v2/')) || url.hostname.includes('githubusercontent.com') || url.hostname.includes('tcgdex.net') || url.hostname.includes('pokellector.com') || url.hostname.includes('bulbagarden.net');
           
           if (isImage) {
             e.respondWith(
@@ -214,6 +214,39 @@ customStyles.innerHTML = `
 @keyframes loadbar {
   0% { left: -100%; }
   100% { left: 100%; }
+}
+
+/* Larger, sharper pack-art thumbnails on the home overview grid.
+   !important + higher specificity so this wins over whatever base
+   grid/card sizing is defined in the main stylesheet. */
+#set-grid.set-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
+  gap: 14px !important;
+}
+.set-card {
+  overflow: hidden !important;
+  padding: 0 0 10px 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.set-card img {
+  width: 100% !important;
+  height: 150px !important;
+  object-fit: cover !important;
+  object-position: center !important;
+  border-radius: 10px 10px 0 0 !important;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  display: block !important;
+}
+.set-card .name {
+  padding: 8px 10px 0 10px !important;
+}
+.set-card .meta {
+  padding: 0 10px !important;
+}
+@media (max-width: 420px) {
+  #set-grid.set-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)) !important; }
+  .set-card img { height: 130px !important; }
 }
 `;
 document.head.appendChild(customStyles);
@@ -551,6 +584,75 @@ function nicheArtFor(setMeta) {
 }
 
 /* ============================================================
+   TCGdex — algorithmic set-logo fallback
+   ------------------------------------------------------------
+   NICHE_PACK_ART above is a hand-maintained map: it only covers
+   sets someone manually looked up, so anything released after the
+   last edit (or any small/regional set nobody added yet) silently
+   falls through to a plain gradient. TCGdex (api.tcgdex.net) is a
+   free, no-key, actively-maintained Pokémon TCG API that carries an
+   official logo for essentially every set, including ones brand new
+   or missing/blank in pokemontcg.io's own `images.logo` field.
+   Rather than hand-map hundreds of set IDs (TCGdex's IDs don't match
+   pokemontcg.io's), we fetch the full TCGdex set list ONCE, cache it
+   forever in localStorage, and match by normalized set name — the
+   same normPackName() used for the Bulbapedia/Pokéllector map above.
+   This means new sets get covered automatically with zero code
+   changes going forward.
+   ============================================================ */
+const TCGDEX_SETS_URL = 'https://api.tcgdex.net/v2/en/sets';
+const TCGDEX_INDEX_KEY = 'tcgdex_set_index_v1';
+let _tcgdexIndexPromise = null;
+async function getTcgdexSetIndex() {
+  const cached = store.get(TCGDEX_INDEX_KEY);
+  // Refresh at most every 14 days — new sets do get added over time,
+  // but this list otherwise barely changes and we don't want every
+  // cold start hitting the network for it.
+  if (cached && cached.map && Date.now() - cached.t < 1000 * 60 * 60 * 24 * 14) {
+    return cached.map;
+  }
+  if (_tcgdexIndexPromise) return _tcgdexIndexPromise;
+  _tcgdexIndexPromise = (async () => {
+    try {
+      const res = await fetch(TCGDEX_SETS_URL);
+      if (!res.ok) throw new Error('tcgdex sets ' + res.status);
+      const list = await res.json();
+      const map = {};
+      for (const s of list) {
+        if (!s || !s.name || !s.logo) continue;
+        const key = normPackName(s.name);
+        // First one wins for a given normalized name (list order is
+        // stable/chronological from the API, so this is deterministic).
+        if (!map[key]) map[key] = s.logo + '.png';
+      }
+      store.set(TCGDEX_INDEX_KEY, { t: Date.now(), map });
+      return map;
+    } catch (e) {
+      // Offline / TCGdex down — fall back to whatever we cached before
+      // (even if stale), or an empty map so callers just skip this source.
+      return (cached && cached.map) || {};
+    } finally {
+      _tcgdexIndexPromise = null;
+    }
+  })();
+  return _tcgdexIndexPromise;
+}
+// A few sets are named differently enough between pokemontcg.io and
+// TCGdex that the plain normalized-name match misses — add exceptions
+// here as normPackName(pokemontcgio-name) -> normPackName(tcgdex-name).
+const TCGDEX_NAME_ALIASES = {
+  wizardsblackstarpromos: 'wizardsofthecoastpromos',
+};
+async function tcgdexLogoFor(setMeta) {
+  const map = await getTcgdexSetIndex();
+  const key = normPackName(setMeta.name);
+  if (map[key]) return map[key];
+  const aliasKey = TCGDEX_NAME_ALIASES[key];
+  if (aliasKey && map[aliasKey]) return map[aliasKey];
+  return null;
+}
+
+/* ============================================================
    Background pack-art prewarmer
    Keeps every set's pack art + logo/symbol warm in Cache Storage
    at all times, so opening a set's detail screen never waits on
@@ -585,11 +687,18 @@ const Prewarm = {
       }
     } catch (e) { /* offline or GitHub-rate-limited — fall back below */ }
 
+    // TCGdex logo — algorithmic, near-total set coverage (see block
+    // above). Resolved before caching so it's baked into the permanent
+    // per-set URL list, same as everything else here.
+    let tcgdexUrl = null;
+    try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline — skip */ }
+
     rawUrls.push(
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
       ...nicheArtFor(setMeta), // Bulbapedia / Pokéllector — covers sets the GitHub repo never has
-      setMeta.images.logo || null
+      tcgdexUrl,               // TCGdex official set logo — covers almost everything else
+      setMeta.images.logo || null // pokemontcg.io's own logo field, last resort
     );
     rawUrls = [...new Set(rawUrls.filter(Boolean))];
 
@@ -2385,6 +2494,19 @@ async function claimShareBonus(platform, btn){
       const creditCountEl = $('#credit-count');
       if(creditCountEl) creditCountEl.textContent = gs.credits;
     } else {
+      // Re-validate the session before hitting a credit-granting RPC.
+      // Switching between several Google accounts in the same browser
+      // can leave the in-memory `session`/`profile` pointed at a stale
+      // account for a moment (the auth listener fires async) — refreshing
+      // here and re-pulling the profile for whichever account is
+      // *actually* current avoids spurious "could not claim" failures
+      // and, worse, crediting the wrong account.
+      const { data: sessData } = await sb.auth.getSession();
+      session = sessData.session;
+      if(!session){ throw new Error('signed_out'); }
+      if(!profile || profile.id !== session.user.id) await loadProfile();
+      if(!profile) throw new Error('profile_unavailable');
+
       const { data: newBalance, error } = await sb.rpc('claim_share_bonus', { p_platform: platform });
       if(error) throw error;
       profile.credits = newBalance;
@@ -2398,7 +2520,13 @@ async function claimShareBonus(platform, btn){
   }catch(e){
     console.error('claimShareBonus failed:', e);
     const msg = e?.message || e?.error_description || e?.code || 'unknown error';
-    toast(msg === 'already_claimed' ? 'Already claimed for this platform' : `Could not claim bonus (${msg}) — try again`);
+    if(msg === 'signed_out'){
+      toast('Your session expired — please sign in again');
+    } else if(msg === 'profile_unavailable'){
+      toast('Could not load your account — try again in a moment');
+    } else {
+      toast(msg === 'already_claimed' ? 'Already claimed for this platform' : `Could not claim bonus (${msg}) — try again`);
+    }
     btn.disabled = false; btn.textContent = originalLabel;
   }
 }
