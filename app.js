@@ -665,25 +665,26 @@ async function tcgdexLogoFor(setMeta) {
    ============================================================ */
 const Prewarm = {
   running: false,
-  PROGRESS_KEY: 'prewarm_progress_v1',
-  FAIL_KEY: 'prewarm_fail_counts_v1',
+  PROGRESS_KEY: 'prewarm_progress_v2',
+  FAIL_KEY: 'prewarm_fail_counts_v2',
   // Resolves (and permanently caches, in localStorage — not just
   // Cache Storage) the list of candidate pack-art image URLs for a
   // set, so repeat visits/prewarm passes never re-hit the GitHub API.
   async resolvePackArtUrls(setMeta) {
-    const cacheKey = 'packart_urls_v1_' + setMeta.id;
+    const cacheKey = 'packart_urls_v2_' + setMeta.id;
     const cached = store.get(cacheKey);
     if (cached && Array.isArray(cached.urls) && cached.urls.length) return cached.urls;
 
     const idLower = setMeta.id.toLowerCase();
     let rawUrls = [];
+    let ghConfirmed = [];
     try {
       const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`);
       if (ghRes.ok) {
         const files = await ghRes.json();
         const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
         images.sort((a, b) => a.name.localeCompare(b.name));
-        rawUrls = images.map(img => img.download_url);
+        ghConfirmed = images.map(img => img.download_url);
       }
     } catch (e) { /* offline or GitHub-rate-limited — fall back below */ }
 
@@ -694,10 +695,14 @@ const Prewarm = {
     try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline — skip */ }
 
     rawUrls.push(
+      ...ghConfirmed, // real, API-confirmed photographic packshots — best when they exist
+      tcgdexUrl,      // TCGdex official set logo — reliable, near-total coverage
+      ...nicheArtFor(setMeta), // Bulbapedia / Pokéllector — hand-picked photographic alternates
+      // Unverified guesses (repo may not have this exact set/path) — kept
+      // last since everything above is either confirmed or much more
+      // likely to resolve; ImgCache just skips whatever 404s.
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
-      ...nicheArtFor(setMeta), // Bulbapedia / Pokéllector — covers sets the GitHub repo never has
-      tcgdexUrl,               // TCGdex official set logo — covers almost everything else
       setMeta.images.logo || null // pokemontcg.io's own logo field, last resort
     );
     rawUrls = [...new Set(rawUrls.filter(Boolean))];
