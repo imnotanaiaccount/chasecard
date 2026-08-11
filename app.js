@@ -523,6 +523,16 @@ const NICHE_PACK_ART = {
   doublecrisis: [pokellector('Double-Crisis.logo.172.png')],
   callsoflegends: [pokellector('Call-of-Legends.logo.33.png')],
   pokemonrumble: [pokellector('Pokemon-Rumble.logo.52.png')],
+  unbrokenbonds: [pokellector('Unbroken-Bonds.logo.269.png')],
+  wizardsblackstarpromos: [pokellector('Wizards-of-the-Coast-Promos.logo.125.png')],
+  wizardsofthecoastpromos: [pokellector('Wizards-of-the-Coast-Promos.logo.125.png')],
+  exdragonfrontiers: [pokellector('EX-Dragon-Frontiers.logo.66.png')],
+  dragonfrontiers: [pokellector('EX-Dragon-Frontiers.logo.66.png')],
+  dpblackstarpromos: [pokellector('DP-Black-Star-Promos.logo.101.png')],
+  swordshield: [pokellector('Sword-Shield.logo.286.png')],
+  megaevolution: [pokellector('Mega-Evolution.logo.422.png')],
+  perfectorder: [pokellector('Perfect-Order.logo.429.png')],
+  rebelclash: [pokellector('Rebel-Clash.logo.292.png')],
 };
 // Fallback for McDonald's sets whose exact promo-year name doesn't hit
 // the map above verbatim (regional variants, "Match Battle" re-namings,
@@ -1667,12 +1677,25 @@ async function renderHome(){
       card.innerHTML = `<img src="" onerror="this.style.display='none'" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
       card.addEventListener('click', ()=> render('set', { set: s }));
       grid.appendChild(card);
-      if(s.images.symbol) {
-        ImgCache.get(s.images.symbol).then(src => {
-          const imgEl = card.querySelector('img');
-          if(imgEl && src) imgEl.src = src;
-        });
-      }
+      // Show the first real pack-art variation (same resolution used on the
+      // set detail screen, shared/cached via Prewarm) so every card on the
+      // overview always has a visual instead of sometimes going blank —
+      // falls back to the set symbol, then the logo, if none resolve.
+      (async () => {
+        const imgEl = card.querySelector('img');
+        if (!imgEl) return;
+        try {
+          const candidates = await Prewarm.resolvePackArtUrls(s);
+          for (const url of candidates) {
+            const src = await ImgCache.get(url, true).catch(() => null);
+            if (src) { imgEl.src = src; imgEl.style.objectFit = 'cover'; return; }
+          }
+        } catch (e) { /* fall through to symbol below */ }
+        if (s.images.symbol) {
+          const src = await ImgCache.get(s.images.symbol, true).catch(() => null);
+          if (src) imgEl.src = src;
+        }
+      })();
     });
   }catch(e){
     const msg = 'Couldn\'t reach the card database — it can be flaky. Nothing was charged.';
