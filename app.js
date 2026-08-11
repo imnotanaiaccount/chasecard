@@ -81,7 +81,7 @@ const CONFIG = {
         });
         self.addEventListener('fetch', e => {
           const url = new URL(e.request.url);
-          const isImage = e.request.destination === 'image' || url.pathname.match(/\\.(png|jpe?g|webp|svg|gif)$/i) || url.hostname.includes('pokemontcg.io') || url.hostname.includes('githubusercontent.com');
+          const isImage = e.request.destination === 'image' || url.pathname.match(/\\.(png|jpe?g|webp|svg|gif)$/i) || (url.hostname.includes('pokemontcg.io') && !url.pathname.startsWith('/v2/')) || url.hostname.includes('githubusercontent.com');
           
           if (isImage) {
             e.respondWith(
@@ -366,8 +366,7 @@ function sellCardFromCollection(cardObj, creditsEarned) {
   }
   
   map[activeName] = coll;
-  store.set('user_collections', map);
-  store.set('collection', coll);
+  store.set(scopedKey('user_collections'), map);
   
   updatePlayerStats(st => {
     st.cardsSold = (st.cardsSold || 0) + 1;
@@ -395,14 +394,29 @@ function sellCardFromCollection(cardObj, creditsEarned) {
    ============================================================ */
 const ImgCache = {
   blobUrls: {},
-  async get(url) {
+  CACHE_NAME: 'chasecards-universal-images-v16',
+  // True if this url is already available (in-memory blob or on-disk Cache
+  // Storage) without touching the network. Used by the background prewarmer
+  // to skip work it's already done.
+  async has(url) {
+    if (!url) return false;
+    if (this.blobUrls[url]) return true;
+    if (!('caches' in window)) return false;
+    try {
+      const cache = await caches.open(this.CACHE_NAME);
+      return !!(await cache.match(url));
+    } catch (e) { return false; }
+  },
+  // silent=true skips the global loader spinner — used for background
+  // prewarming so it doesn't flicker the UI while the user is elsewhere.
+  async get(url, silent = false) {
     if (!url) return '';
     if (this.blobUrls[url]) return this.blobUrls[url];
     
-    showLoader();
+    if (!silent) showLoader();
     try {
       if ('caches' in window) {
-        const cache = await caches.open('chasecards-universal-images-v16');
+        const cache = await caches.open(this.CACHE_NAME);
         let res = await cache.match(url);
         if (!res) {
           res = await fetch(url, { mode: 'cors', credentials: 'omit' });
@@ -412,14 +426,14 @@ const ImgCache = {
           const blob = await res.blob();
           const blobUrl = URL.createObjectURL(blob);
           this.blobUrls[url] = blobUrl;
-          hideLoader();
+          if (!silent) hideLoader();
           return blobUrl;
         }
       }
     } catch (e) {
       console.warn('Persistent caching fallback triggered', e);
     } finally {
-      hideLoader();
+      if (!silent) hideLoader();
     }
     
     return new Promise((resolve) => {
@@ -430,6 +444,100 @@ const ImgCache = {
     });
   },
   sync(url) { return this.blobUrls[url] || url; }
+};
+
+/* ============================================================
+   Background pack-art prewarmer
+   Keeps every set's pack art + logo/symbol warm in Cache Storage
+   at all times, so opening a set's detail screen never waits on
+   a GitHub lookup or an image download — it's already local.
+   Runs quietly whenever the app is open (home, collection, any
+   screen), paces itself to be idle-priority, and remembers its
+   progress across sessions so it never redoes finished sets.
+   Nothing here is ever evicted — it only stops caching a set once
+   that set is fully warm, and the cache itself is never cleared.
+   ============================================================ */
+const Prewarm = {
+  running: false,
+  PROGRESS_KEY: 'prewarm_progress_v1',
+  // Resolves (and permanently caches, in localStorage — not just
+  // Cache Storage) the list of candidate pack-art image URLs for a
+  // set, so repeat visits/prewarm passes never re-hit the GitHub API.
+  async resolvePackArtUrls(setMeta) {
+    const cacheKey = 'packart_urls_v1_' + setMeta.id;
+    const cached = store.get(cacheKey);
+    if (cached && Array.isArray(cached.urls) && cached.urls.length) return cached.urls;
+
+    const idLower = setMeta.id.toLowerCase();
+    let rawUrls = [];
+    try {
+      const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`);
+      if (ghRes.ok) {
+        const files = await ghRes.json();
+        const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
+        images.sort((a, b) => a.name.localeCompare(b.name));
+        rawUrls = images.map(img => img.download_url);
+      }
+    } catch (e) { /* offline or GitHub-rate-limited — fall back below */ }
+
+    rawUrls.push(
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
+      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
+      setMeta.images.logo || null
+    );
+    rawUrls = [...new Set(rawUrls.filter(Boolean))];
+
+    // Only persist the resolved list once we actually got something back
+    // from GitHub (or have a logo fallback) — don't lock in an empty
+    // result just because we were offline for a moment.
+    if (rawUrls.length) store.set(cacheKey, { t: Date.now(), urls: rawUrls });
+    return rawUrls;
+  },
+  async warmSet(setMeta) {
+    const urls = await this.resolvePackArtUrls(setMeta);
+    for (const url of urls) {
+      if (await this.yieldIfBusy()) return false; // user started something real — bail, resume later
+      if (await ImgCache.has(url)) continue;
+      await ImgCache.get(url, true).catch(() => null);
+    }
+    if (setMeta.images.symbol && !(await ImgCache.has(setMeta.images.symbol))) {
+      await ImgCache.get(setMeta.images.symbol, true).catch(() => null);
+    }
+    if (setMeta.images.logo && !(await ImgCache.has(setMeta.images.logo))) {
+      await ImgCache.get(setMeta.images.logo, true).catch(() => null);
+    }
+    return true;
+  },
+  // Cooperative pause point: if a pack is actively being opened, let that
+  // network activity go first instead of competing with it.
+  async yieldIfBusy() {
+    if (!window.__packOpenInFlight) return false;
+    await new Promise(r => setTimeout(r, 1500));
+    return !!window.__packOpenInFlight;
+  },
+  // Fire-and-forget: call once (e.g. from renderHome). Safe to call many
+  // times — it no-ops if already running.
+  start(sets) {
+    if (this.running || !sets || !sets.length) return;
+    this.running = true;
+    (async () => {
+      let doneIds = new Set(store.get(this.PROGRESS_KEY, []));
+      for (const setMeta of sets) {
+        if (doneIds.has(setMeta.id)) continue;
+        // yield to the event loop / let real UI work take priority
+        await new Promise(r => (window.requestIdleCallback || setTimeout)(r, { timeout: 2000 }));
+        try {
+          const finished = await this.warmSet(setMeta);
+          if (finished) {
+            doneIds.add(setMeta.id);
+            store.set(this.PROGRESS_KEY, [...doneIds]);
+          }
+        } catch (e) { /* skip this set, retry next session */ }
+        await new Promise(r => setTimeout(r, 500)); // pace ourselves — don't hammer GitHub/CDN
+      }
+      this.running = false;
+    })();
+  }
 };
 
 /* ============================================================
@@ -752,22 +860,31 @@ async function loadProfile(attempt=1){
 /* ============================================================
    Multi-Collection & Trading Helpers
    ============================================================ */
+// Collections/referral state are namespaced per logged-in user (or 'guest')
+// so that switching between different Google accounts on the same browser
+// doesn't leak one account's pack collection/state into another's.
+function scopedKey(base){
+  const uid = (!guestMode && session?.user?.id) ? session.user.id : 'guest';
+  return base + '__' + uid;
+}
+
 function getCollectionsMap() {
-  let map = store.get('user_collections', null);
+  let map = store.get(scopedKey('user_collections'), null);
   if (!map || typeof map !== 'object') {
-    const legacy = store.get('collection', null);
+    // one-time migration from the old unscoped key, guest sessions only
+    const legacy = guestMode ? store.get('collection', null) : null;
     map = { 'Main Collection': legacy || {} };
-    store.set('user_collections', map);
+    store.set(scopedKey('user_collections'), map);
   }
   return map;
 }
 
 function getActiveCollectionName() {
   const map = getCollectionsMap();
-  let active = store.get('active_collection', null);
+  let active = store.get(scopedKey('active_collection'), null);
   if (!active || !map[active]) {
     active = Object.keys(map)[0] || 'Main Collection';
-    store.set('active_collection', active);
+    store.set(scopedKey('active_collection'), active);
   }
   return active;
 }
@@ -787,8 +904,7 @@ function persistToActiveCollection(packCards){
     map[active][c.id] = map[active][c.id] || { name:c.name, image:c.images.small, rarity:c.rarity, count:0 };
     map[active][c.id].count++;
   });
-  store.set('user_collections', map);
-  store.set('collection', map[active]);
+  store.set(scopedKey('user_collections'), map);
 }
 
 /* ============================================================
@@ -1407,6 +1523,10 @@ async function renderHome(){
   try{
     const sets = await getSets();
     grid.innerHTML = '';
+    // Fire-and-forget: keeps warming pack art/logos for every set in the
+    // background (idle-paced, resumes across sessions, never re-does a
+    // finished set) so tapping into any set later is instant.
+    Prewarm.start(sets);
     sets.forEach(s=>{
       const card = el('div','set-card');
       const costDisplay = s.packCost || 150;
@@ -1503,26 +1623,11 @@ async function renderSetDetail(setMeta){
     setDetailCardsCache = cards; setDetailCardsCacheSetId = setMeta.id;
     
     const gallery = $('#pack-gallery', wrap);
-    const idLower = setMeta.id.toLowerCase();
-    
-    let rawUrls = [];
-    try {
-      const githubApiUrl = `https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`;
-      const ghRes = await fetch(githubApiUrl);
-      if (ghRes.ok) {
-        const files = await ghRes.json();
-        const images = files.filter(f => f.type === 'file' && f.name.match(/\.(png|jpe?g|webp)$/i));
-        images.sort((a,b) => a.name.localeCompare(b.name));
-        rawUrls = images.map(img => img.download_url);
-      }
-    } catch(err) { console.warn('Could not fetch packshot directory contents', err); }
 
-    rawUrls.push(
-      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
-      `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
-      setMeta.images.logo || null
-    );
-    rawUrls = rawUrls.filter(Boolean);
+    // Shared with the background prewarmer — if this set was already
+    // warmed while the user was elsewhere, both the URL list and the
+    // images themselves resolve instantly from cache with no network hit.
+    const rawUrls = await Prewarm.resolvePackArtUrls(setMeta);
 
     const validUrls = [];
     for(const url of rawUrls) {
@@ -1584,6 +1689,7 @@ async function beginOpen(setMeta, packCost, qty = 1){
   const totalCost = packCost * qty;
   if(!isAdminUser() && currentCredits() < totalCost){ return openGetCreditsModal(true); }
   const btn = $('#open-pack-btn'); if(btn) { btn.disabled = true; btn.textContent = 'Loading cards…'; }
+  window.__packOpenInFlight = true; // tell the background prewarmer to stand down while this runs
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
 
@@ -1668,6 +1774,7 @@ async function beginOpen(setMeta, packCost, qty = 1){
     const detail = e?.message || e?.error_description || e?.details || String(e);
     toast(e.message==='insufficient_credits' ? 'Not enough credits' : `Error: ${detail}`, 8000);
   }finally{ 
+    window.__packOpenInFlight = false;
     if(btn) { 
       btn.disabled=false; 
       const currentSliderVal = $('#pack-qty-slider')?.value || 1;
@@ -1893,7 +2000,7 @@ function renderCollection(){
   app.appendChild(wrap);
 
   $('#collection-select', wrap).addEventListener('change', (e) => {
-    store.set('active_collection', e.target.value);
+    store.set(scopedKey('active_collection'), e.target.value);
     render('collection');
   });
 
@@ -1903,8 +2010,8 @@ function renderCollection(){
     const name = bName.trim();
     if(map[name]) { toast('Collection already exists'); return; }
     map[name] = {};
-    store.set('user_collections', map);
-    store.set('active_collection', name);
+    store.set(scopedKey('user_collections'), map);
+    store.set(scopedKey('active_collection'), name);
     render('collection');
     toast(`Created collection "${name}"`);
   });
@@ -1917,8 +2024,8 @@ function renderCollection(){
     if(map[trimmed]) { toast('A collection with that name already exists'); return; }
     map[trimmed] = map[activeName];
     delete map[activeName];
-    store.set('user_collections', map);
-    store.set('active_collection', trimmed);
+    store.set(scopedKey('user_collections'), map);
+    store.set(scopedKey('active_collection'), trimmed);
     render('collection');
     toast('Collection renamed successfully');
   });
@@ -1927,9 +2034,8 @@ function renderCollection(){
     if(!Object.keys(coll).length) { toast('Collection is already empty'); return; }
     if(!confirm(`Are you sure you want to clear all cards from collection "${activeName}"?`)) return;
     map[activeName] = {};
-    store.set('user_collections', map);
-    store.set('collection', {});
-    render('collection');
+    store.set(scopedKey('user_collections'), map);
+        render('collection');
     toast(`Cleared all cards from "${activeName}"`);
   });
 
@@ -1937,8 +2043,8 @@ function renderCollection(){
     if(Object.keys(map).length <= 1) { toast('Cannot delete your last remaining collection'); return; }
     if(!confirm(`Are you sure you want to permanently delete collection "${activeName}" and all its cards?`)) return;
     delete map[activeName];
-    store.set('user_collections', map);
-    store.set('active_collection', Object.keys(map)[0]);
+    store.set(scopedKey('user_collections'), map);
+    store.set(scopedKey('active_collection'), Object.keys(map)[0]);
     render('collection');
     toast('Collection permanently deleted');
   });
@@ -1975,8 +2081,8 @@ function renderCollection(){
           uniqueName = `${bName} (${counter++})`;
         }
         map[uniqueName] = importedColl;
-        store.set('user_collections', map);
-        store.set('active_collection', uniqueName);
+        store.set(scopedKey('user_collections'), map);
+        store.set(scopedKey('active_collection'), uniqueName);
         render('collection');
         toast(`Successfully imported collection "${uniqueName}"!`);
       } catch(err) {
@@ -2134,7 +2240,8 @@ async function claimShareBonus(platform, btn){
     btn.textContent = '✓ Claimed';
   }catch(e){
     console.error('claimShareBonus failed:', e);
-    toast(e.message === 'already_claimed' ? 'Already claimed for this platform' : 'Could not claim bonus — try again');
+    const msg = e?.message || e?.error_description || e?.code || 'unknown error';
+    toast(msg === 'already_claimed' ? 'Already claimed for this platform' : `Could not claim bonus (${msg}) — try again`);
     btn.disabled = false; btn.textContent = originalLabel;
   }
 }
@@ -2218,3 +2325,4 @@ function openGetCreditsModal(lowBalance=false){
    Boot
    ============================================================ */
 initAuth();
+        
