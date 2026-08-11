@@ -232,8 +232,15 @@ customStyles.innerHTML = `
 .set-card img {
   width: 100% !important;
   height: 150px !important;
-  object-fit: cover !important;
+  /* contain, not cover: candidates mix tall pack-shot photos with wide
+     official set logos (TCGdex, pokemontcg.io) — cover crops the wide
+     ones into a cropped, half-legible mess. Contain always shows the
+     whole image, letterboxed on a matching gradient so it still reads
+     as a deliberate card rather than empty space. */
+  object-fit: contain !important;
   object-position: center !important;
+  box-sizing: border-box !important;
+  padding: 10px !important;
   border-radius: 10px 10px 0 0 !important;
   background: linear-gradient(135deg, #1e293b, #0f172a);
   display: block !important;
@@ -665,18 +672,24 @@ async function tcgdexLogoFor(setMeta) {
    ============================================================ */
 const Prewarm = {
   running: false,
-  PROGRESS_KEY: 'prewarm_progress_v2',
-  FAIL_KEY: 'prewarm_fail_counts_v2',
+  PROGRESS_KEY: 'prewarm_progress_v3',
+  FAIL_KEY: 'prewarm_fail_counts_v3',
   // Resolves (and permanently caches, in localStorage — not just
   // Cache Storage) the list of candidate pack-art image URLs for a
   // set, so repeat visits/prewarm passes never re-hit the GitHub API.
   async resolvePackArtUrls(setMeta) {
-    const cacheKey = 'packart_urls_v2_' + setMeta.id;
+    const cacheKey = 'packart_urls_v3_' + setMeta.id;
     const cached = store.get(cacheKey);
     if (cached && Array.isArray(cached.urls) && cached.urls.length) return cached.urls;
 
     const idLower = setMeta.id.toLowerCase();
-    let rawUrls = [];
+
+    // TCGdex logo first — one cheap indexed lookup (the underlying set
+    // list is fetched once and reused), so this resolves near-instantly
+    // and doesn't compete for GitHub's rate limit.
+    let tcgdexUrl = null;
+    try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline — skip */ }
+
     let ghConfirmed = [];
     try {
       const ghRes = await fetch(`https://api.github.com/repos/1niceroli/ptcg-assets/contents/${idLower}/packshots`);
@@ -686,31 +699,35 @@ const Prewarm = {
         images.sort((a, b) => a.name.localeCompare(b.name));
         ghConfirmed = images.map(img => img.download_url);
       }
-    } catch (e) { /* offline or GitHub-rate-limited — fall back below */ }
+    } catch (e) { /* offline, CORS, or GitHub-rate-limited (60/hr unauthenticated) — fall back below */ }
 
-    // TCGdex logo — algorithmic, near-total set coverage (see block
-    // above). Resolved before caching so it's baked into the permanent
-    // per-set URL list, same as everything else here.
-    let tcgdexUrl = null;
-    try { tcgdexUrl = await tcgdexLogoFor(setMeta); } catch (e) { /* offline — skip */ }
+    const niche = nicheArtFor(setMeta);
 
-    rawUrls.push(
+    const rawUrls = [...new Set([
       ...ghConfirmed, // real, API-confirmed photographic packshots — best when they exist
       tcgdexUrl,      // TCGdex official set logo — reliable, near-total coverage
-      ...nicheArtFor(setMeta), // Bulbapedia / Pokéllector — hand-picked photographic alternates
+      ...niche,        // Bulbapedia / Pokéllector — hand-picked photographic alternates
       // Unverified guesses (repo may not have this exact set/path) — kept
       // last since everything above is either confirmed or much more
       // likely to resolve; ImgCache just skips whatever 404s.
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.png`,
       `https://raw.githubusercontent.com/1niceroli/ptcg-assets/main/${idLower}/packshots/1.jpg`,
-      setMeta.images.logo || null // pokemontcg.io's own logo field, last resort
-    );
-    rawUrls = [...new Set(rawUrls.filter(Boolean))];
+      setMeta.images.logo || null, // pokemontcg.io's own logo field, last resort
+    ].filter(Boolean))];
 
-    // Only persist the resolved list once we actually got something back
-    // from GitHub (or have a logo fallback) — don't lock in an empty
-    // result just because we were offline for a moment.
-    if (rawUrls.length) store.set(cacheKey, { t: Date.now(), urls: rawUrls });
+    // Only persist the resolved list once at least one *reliable* source
+    // (confirmed GitHub listing, TCGdex, or the hand-picked niche map)
+    // actually came back. The two raw GitHub guesses and the pokemontcg
+    // logo are always non-empty strings, so caching on "rawUrls.length"
+    // alone used to lock in a permanently art-less list any time TCGdex
+    // or GitHub had a transient hiccup (offline blip, GitHub rate limit,
+    // slow network during the initial big prewarm burst) — this was the
+    // actual cause of "big obvious sets" staying blank forever even
+    // after a source that would've worked was added. Only a genuinely
+    // confirmed source earns the permanent cache entry; anything else
+    // retries next time instead of getting stuck.
+    const hasReliableSource = ghConfirmed.length > 0 || !!tcgdexUrl || niche.length > 0;
+    if (rawUrls.length && hasReliableSource) store.set(cacheKey, { t: Date.now(), urls: rawUrls });
     return rawUrls;
   },
   async warmSet(setMeta) {
@@ -1785,32 +1802,50 @@ async function renderHome(){
     // background (idle-paced, resumes across sessions, never re-does a
     // finished set) so tapping into any set later is instant.
     Prewarm.start(sets);
-    sets.forEach(s=>{
+
+    // Resolve every card's art through a small concurrency-limited queue
+    // instead of firing ~200 simultaneous lookups at once. Uncapped
+    // concurrency here was hammering GitHub's unauthenticated rate limit
+    // (60 req/hr) and piling up dozens of parallel TCGdex/image fetches
+    // that the browser itself throttles to a handful of connections per
+    // host anyway — the practical effect was that plenty of sets (often
+    // big, well-known ones, just by the luck of fetch ordering) silently
+    // lost the race and fell back to blank. A small pool resolves each
+    // card reliably instead of racing all of them at once.
+    const CONCURRENCY = 5;
+    const tasks = sets.map(s => async () => {
       const card = el('div','set-card');
       const costDisplay = s.packCost || 150;
       card.innerHTML = `<img src="" onerror="this.style.display='none'" alt=""/><div class="name">${s.name}</div><div class="meta">${s.series} · ${costDisplay} cr</div>`;
       card.addEventListener('click', ()=> render('set', { set: s }));
       grid.appendChild(card);
-      // Show the first real pack-art variation (same resolution used on the
-      // set detail screen, shared/cached via Prewarm) so every card on the
-      // overview always has a visual instead of sometimes going blank —
-      // falls back to the set symbol, then the logo, if none resolve.
-      (async () => {
-        const imgEl = card.querySelector('img');
-        if (!imgEl) return;
-        try {
-          const candidates = await Prewarm.resolvePackArtUrls(s);
-          for (const url of candidates) {
-            const src = await ImgCache.get(url, true).catch(() => null);
-            if (src) { imgEl.src = src; imgEl.style.objectFit = 'cover'; return; }
-          }
-        } catch (e) { /* fall through to symbol below */ }
-        if (s.images.symbol) {
-          const src = await ImgCache.get(s.images.symbol, true).catch(() => null);
-          if (src) imgEl.src = src;
+      const imgEl = card.querySelector('img');
+      if (!imgEl) return;
+      try {
+        const candidates = await Prewarm.resolvePackArtUrls(s);
+        for (const url of candidates) {
+          const src = await ImgCache.get(url, true).catch(() => null);
+          if (src) { imgEl.src = src; return; }
         }
-      })();
+      } catch (e) { /* fall through to symbol below */ }
+      if (s.images.symbol) {
+        const src = await ImgCache.get(s.images.symbol, true).catch(() => null);
+        if (src) imgEl.src = src;
+      }
     });
+    // Cards need to append in set order, so run the queue but keep a
+    // per-set placeholder slot so later sets don't jump ahead visually —
+    // simplest correct approach here is just to await each pool "lane"
+    // in order of the sets array while still allowing CONCURRENCY lanes
+    // to be in flight at once.
+    let next = 0;
+    async function lane() {
+      while (next < tasks.length) {
+        const i = next++;
+        await tasks[i]();
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, lane));
   }catch(e){
     const msg = 'Couldn\'t reach the card database — it can be flaky. Nothing was charged.';
     grid.innerHTML = `<div class="hint" style="grid-column:1/-1;text-align:center;padding:20px 8px;">${msg}</div>`;
