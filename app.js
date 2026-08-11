@@ -2221,8 +2221,8 @@ async function renderHome(){
     }
     await Promise.all(Array.from({ length: CONCURRENCY }, lane));
 
-  }catch(e){
-    const msg = 'Couldn\\'t reach the card database — it can be flaky. Nothing was charged.';
+  } catch(e) {
+    const msg = "Couldn't reach the card database — it can be flaky. Nothing was charged.";
     grid.innerHTML = `<div class="hint" style="grid-column:1/-1;text-align:center;padding:20px 8px;">${msg}</div>`;
     const retryBtn = el('button','btn btn-secondary'); retryBtn.textContent = 'Retry'; retryBtn.style.gridColumn = '1/-1';
     retryBtn.addEventListener('click', ()=> render('home')); grid.appendChild(retryBtn);
