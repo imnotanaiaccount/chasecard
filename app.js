@@ -1292,14 +1292,6 @@ async function getSets(){
   }
 }
 
-// TCGdex fetches below (unlike pokeFetch, which has its own 12s
-// AbortController) had no timeout at all. getCardsForSet() for a JP set
-// issues one of these per card to fetch rarity — 100+ individual requests
-// for a large set, 8 at a time. With no timeout, a single stalled TCGdex
-// connection leaves its worker's while-loop permanently pending, so
-// Promise.all() never resolves and beginOpen() hangs on "Loading cards…"
-// forever. This wraps every tcgdex fetch below with a hard deadline so a
-// stalled request fails fast into the existing try/catch instead.
 async function fetchWithTimeout(url, ms = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
@@ -1311,9 +1303,10 @@ async function fetchWithTimeout(url, ms = 8000) {
 }
 
 async function getCardsForSet(setId){
-  const key = 'cache_cards_v6_' + setId; // v3->v4: JP rarity; v4->v5: pokemontcg.io image fallback added; v5->v6: that fallback was searching pokemontcg.io (English-only) with the raw Japanese card name and could never match — now uses an actual English name
+  const key = 'cache_cards_v6_' + setId; 
   const cached = store.get(key);
   if(cached && Date.now() - cached.t < 1000*60*60*24*7) return cached.data;
+  
   if (setId.startsWith('jp-')) {
     const realId = setId.slice(3);
     try{
@@ -1322,43 +1315,6 @@ async function getCardsForSet(setId){
       const setData = await res.json();
       const jaCards = setData.cards || [];
 
-      // TCGdex uses ONE shared set id across every locale (the "ja" and
-      // "en" releases of realId are the same underlying set object) but
-      // stores each locale's scans as separate assets. Older/niche JP
-      // sets often never had their own ja/ image assets contributed
-      // (tcgdex's own FAQ: "if a card has no image field, the image has
-      // not yet been added to the database"), even though the identical
-      // card usually got an English asset uploaded. So for any card
-      // missing a ja image, fall back to the English asset for the same
-      // set id + localId — same artwork, not a different card.
-      let enByLocalId = {};
-      let enNameByLocalId = {};
-      if (jaCards.some(c => !c.image)) {
-        try {
-          const enRes = await fetchWithTimeout(`https://api.tcgdex.net/v2/en/sets/${realId}`);
-          if (enRes.ok) {
-            const enData = await enRes.json();
-            for (const ec of (enData.cards || [])) {
-              if (!ec.localId) continue;
-              if (ec.image) enByLocalId[ec.localId] = ec.image;
-              if (ec.name) enNameByLocalId[ec.localId] = ec.name; // English name, even when this locale also has no image — needed below since c.name is Japanese and pokemontcg.io is English-only
-            }
-          }
-        } catch (e) { /* no English release of this set either — fine, just no fallback */ }
-      }
-
-      // BUGFIX: the /sets/{id} endpoint (used above for jaCards) only ever
-      // returns CardBrief objects — id/localId/name/image, no `rarity` field
-      // at all (confirmed against TCGdex's own schema docs). So `c.rarity`
-      // below was silently always undefined for every JP card, every JP
-      // card fell into the "common" tier, and generatePack() never had a
-      // holo/rare/etc. pool to pull from — JP packs were always flat with
-      // no chase hits, unlike English packs (which come from the
-      // pokemontcg.io /cards endpoint that does include rarity per card).
-      // Real rarity only exists on the full Card object, which requires a
-      // per-card GET. Fetch those in small concurrent batches and cache
-      // the merged result for the same week-long TTL as everything else
-      // here, so this cost is paid once per set, not per pack opened.
       const rarityByCardId = {};
       const CONCURRENCY = 8;
       let cursor = 0;
@@ -1371,15 +1327,11 @@ async function getCardsForSet(setId){
               const full = await cRes.json();
               if (full && full.rarity) rarityByCardId[c.id] = full.rarity;
             }
-          } catch (e) { /* leave unset — falls back to English rarity below, then Common */ }
+          } catch (e) { /* leave unset */ }
         }
       }
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jaCards.length) }, rarityWorker));
 
-      // A handful of niche JP cards never got their own ja/ card record
-      // filled in (same "not yet added to the database" gap as images).
-      // Same card, same print — the English release's rarity is a safe
-      // fallback for those, matched by localId like the image fallback above.
       const missingRarity = jaCards.filter(c => !rarityByCardId[c.id]);
       if (missingRarity.length) {
         let enRarityByLocalId = {};
@@ -1404,76 +1356,23 @@ async function getCardsForSet(setId){
             }
             await Promise.all(Array.from({ length: Math.min(CONCURRENCY, enBriefs.length) }, enRarityWorker));
           }
-        } catch (e) { /* offline — these stay Common, same as before the fix */ }
+        } catch (e) { /* offline */ }
         for (const c of missingRarity) {
           if (enRarityByLocalId[c.localId]) rarityByCardId[c.id] = enRarityByLocalId[c.localId];
         }
       }
 
-      // TERTIARY IMAGE FALLBACK: a card can still have no image here if
-      // TCGdex has neither a ja/ nor an en/ asset for it (genuinely never
-      // contributed — same FAQ gap noted above). pokemontcg.io indexes
-      // English prints from a separate pipeline and frequently has art
-      // for cards TCGdex is still missing.
-      //
-      // BUGFIX: this used to search pokemontcg.io (English-only) using
-      // c.name directly — but c.name here is the Japanese name (e.g.
-      // "基本草エネルギー"), which can never match an English database.
-      // That silently made this whole fallback a no-op for every card
-      // whose TCGdex en/ record also had no image, which is exactly the
-      // "Image Unavailable" case it was meant to catch. Now it looks up
-      // an actual English name first — from TCGdex's own en/ locale data
-      // (enNameByLocalId, captured above independently of whether that
-      // locale had an image) — and only falls back to the small hardcoded
-      // JP energy map below for the handful of ancient sets where TCGdex
-      // has no en/ record at all for that localId. If neither resolves to
-      // an English name, there's nothing safe to search with, so that
-      // card is skipped rather than querying with Japanese text.
-      const JP_ENERGY_NAME_EN = {
-        '基本草エネルギー': 'Grass Energy', '草エネルギー': 'Grass Energy',
-        '基本炎エネルギー': 'Fire Energy', '炎エネルギー': 'Fire Energy',
-        '基本水エネルギー': 'Water Energy', '水エネルギー': 'Water Energy',
-        '基本雷エネルギー': 'Lightning Energy', '雷エネルギー': 'Lightning Energy',
-        '基本超エネルギー': 'Psychic Energy', '超エネルギー': 'Psychic Energy',
-        '基本闘エネルギー': 'Fighting Energy', '闘エネルギー': 'Fighting Energy',
-        '基本悪エネルギー': 'Darkness Energy', '悪エネルギー': 'Darkness Energy',
-        '基本鋼エネルギー': 'Metal Energy', '鋼エネルギー': 'Metal Energy',
-        '基本フェアリーエネルギー': 'Fairy Energy', 'フェアリーエネルギー': 'Fairy Energy',
-      };
-      function englishNameFor(c) {
-        return enNameByLocalId[c.localId] || JP_ENERGY_NAME_EN[c.name] || null;
-      }
-      const stillMissingImg = jaCards.filter(c => !c.image && !enByLocalId[c.localId] && englishNameFor(c));
-      let pokeImgByName = {};
-      if (stillMissingImg.length) {
-        const uniqueNames = [...new Set(stillMissingImg.map(c => englishNameFor(c)))];
-        let pcursor = 0;
-        async function pokeImgWorker() {
-          while (pcursor < uniqueNames.length) {
-            const nm = uniqueNames[pcursor++];
-            try {
-              const pRes = await pokeFetch(`/cards?q=${encodeURIComponent('name:"' + nm + '"')}&pageSize=1`);
-              const hit = pRes?.data?.[0];
-              if (hit?.images?.large) pokeImgByName[nm] = { small: hit.images.small || hit.images.large, large: hit.images.large };
-            } catch (e) { /* offline, not found, or rate-limited — card stays without art */ }
-          }
-        }
-        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, uniqueNames.length) }, pokeImgWorker));
-      }
-
+      // Fixed issue from Screenshot_20260814-200610.png
+      // Sourcing Japanese images from root folder / repo instead of falling back to English cards
       const data = jaCards.map(c => {
-        const img = c.image || enByLocalId[c.localId] || '';
-        const pokeFallback = !img ? pokeImgByName[englishNameFor(c)] : null;
+        const img = c.image;
         return {
           id: 'jp-' + c.id,
           name: c.name,
           rarity: rarityByCardId[c.id] || '',
-          images: pokeFallback ? {
-            small: pokeFallback.small,
-            large: pokeFallback.large,
-          } : {
-            small: img ? img + '/low.webp' : '',
-            large: img ? img + '/high.webp' : '',
+          images: {
+            small: img ? img + '/low.webp' : `/${realId}/${c.localId}.png`,
+            large: img ? img + '/high.webp' : `/${realId}/${c.localId}.png`,
           },
           set: { name: setData.name || realId },
         };
@@ -2602,7 +2501,16 @@ async function beginOpen(setMeta, packCost, qty = 1){
 
   const totalCost = packCost * qty;
   if(!isAdminUser() && currentCredits() < totalCost){ return openGetCreditsModal(true); }
-  const btn = $('#open-pack-btn'); if(btn) { btn.disabled = true; btn.textContent = 'Loading cards…'; }
+  const btn = $('#open-pack-btn'); 
+  if(btn) {
+      btn.innerHTML = `
+        <div id="btn-text" style="position:relative; z-index:2;">Caching pack assets... 0%</div>
+        <div id="pack-load-prog" style="position:absolute; left:0; top:0; bottom:0; width:0%; background:rgba(255,255,255,0.2); transition:width 0.2s; z-index:1; pointer-events:none;"></div>
+      `;
+      btn.style.position = 'relative';
+      btn.style.overflow = 'hidden';
+      btn.disabled = true;
+  }
   window.__packOpenInFlight = true;
   try{
     const cards = (setDetailCardsCacheSetId === setMeta.id && setDetailCardsCache) || await getCardsForSet(setMeta.id);
@@ -2652,8 +2560,6 @@ async function beginOpen(setMeta, packCost, qty = 1){
       });
     });
 
-    if(btn) btn.textContent = 'Caching pack assets...';
-    
     const urlsToPrefetch = [];
     if(setMeta.images.logo) urlsToPrefetch.push(setMeta.images.logo);
     if(setMeta.resolvedPackArt) urlsToPrefetch.push(setMeta.resolvedPackArt);
@@ -2666,7 +2572,20 @@ async function beginOpen(setMeta, packCost, qty = 1){
       });
     });
     
-    await Promise.all(urlsToPrefetch.map(url => ImgCache.get(url).catch(()=>null)));
+    let loadedCount = 0;
+    const totalUrls = urlsToPrefetch.length;
+    if(totalUrls > 0) {
+      await Promise.all(urlsToPrefetch.map(url => ImgCache.get(url).finally(() => {
+        loadedCount++;
+        if(btn) {
+          const bt = btn.querySelector('#btn-text');
+          const pb = btn.querySelector('#pack-load-prog');
+          const pct = Math.round((loadedCount/totalUrls)*100);
+          if(bt) bt.textContent = `Caching pack assets... ${pct}%`;
+          if(pb) pb.style.width = `${pct}%`;
+        }
+      })));
+    }
     
     const allFlatCards = [];
     openedPacks.forEach(p => p.cards.forEach(c => allFlatCards.push(c)));
@@ -2690,6 +2609,10 @@ async function beginOpen(setMeta, packCost, qty = 1){
   }finally{ 
     window.__packOpenInFlight = false;
     if(btn) { 
+      btn.style.position = '';
+      btn.style.overflow = '';
+      const pb = btn.querySelector('#pack-load-prog');
+      if(pb) pb.remove();
       btn.disabled=false; 
       const currentSliderVal = $('#pack-qty-slider')?.value || 1;
       const currentTotalCost = currentSliderVal * packCost;
