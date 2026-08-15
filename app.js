@@ -1303,7 +1303,8 @@ async function fetchWithTimeout(url, ms = 8000) {
 }
 
 async function getCardsForSet(setId){
-  const key = 'cache_cards_v6_' + setId; 
+  // Bumped cache to v7 to ensure the new Japanese image paths take effect immediately
+  const key = 'cache_cards_v7_' + setId; 
   const cached = store.get(key);
   if(cached && Date.now() - cached.t < 1000*60*60*24*7) return cached.data;
   
@@ -1315,6 +1316,13 @@ async function getCardsForSet(setId){
       if(!res.ok) throw new Error('tcgdex ja set ' + res.status);
       const setData = await res.json();
       const jaCards = setData.cards || [];
+
+      // 1. FIX THE "1/0 CARDS" GLITCH
+      // If TCGdex has the set registered but no cards populated yet, throw an error
+      // so it safely cancels the pack opening before spending credits.
+      if (!jaCards || jaCards.length === 0) {
+        throw new Error(`The set ${setData.name || realId} has no cards available in the Japanese database yet.`);
+      }
 
       const rarityByCardId = {};
       const CONCURRENCY = 8;
@@ -1363,17 +1371,43 @@ async function getCardsForSet(setId){
         }
       }
 
-      // Fixed issue from Screenshot_20260814-200610.png
-      // Sourcing Japanese images from root folder / repo instead of falling back to English cards
+      // Helper to map the set ID prefix to the official TCGdex series ID
+      function getSeriesFromSetId(id) {
+          id = id.toLowerCase();
+          if (id.startsWith('sv')) return 'sv';
+          if (id.startsWith('s') && !id.startsWith('sm')) return 'swsh';
+          if (id.startsWith('sm')) return 'sm';
+          if (id.startsWith('xy')) return 'xy';
+          if (id.startsWith('bw')) return 'bw';
+          if (id.startsWith('dp')) return 'dp';
+          if (id.startsWith('pt')) return 'pl';
+          if (id.startsWith('hgss') || id.startsWith('l')) return 'hgss';
+          if (id.startsWith('pcg') || id.startsWith('adv')) return 'ex';
+          return 'sv'; // default fallback
+      }
+
+      const serieId = setData.serie?.id || getSeriesFromSetId(realId);
+
+      // 2. FIX ENGLISH ENERGIES & BLANK CARDS
       const data = jaCards.map(c => {
-        const img = c.image;
+        // Construct the strict TCGdex Japanese CDN path
+        let imgBase = `https://assets.tcgdex.net/ja/${serieId}/${realId}/${c.localId}`;
+        
+        // TCGdex often returns the English CDN path (e.g., /en/sv/sv1/...) inside c.image 
+        // for Japanese cards if they haven't mapped/scanned the Japanese art yet. 
+        // This is what caused JP Energies to show in English. We override this by strictly 
+        // requesting the /ja/ path. If TCGdex explicitly provides a /ja/ path, we use it.
+        if (c.image && c.image.includes('/ja/')) {
+            imgBase = c.image;
+        }
+
         return {
           id: 'jp-' + c.id,
           name: c.name,
           rarity: rarityByCardId[c.id] || '',
           images: {
-            small: img ? img + '/low.webp' : `/ja_${realIdLower}/${c.localId}.png`,
-            large: img ? img + '/high.webp' : `/ja_${realIdLower}/${c.localId}.png`,
+            small: imgBase + '/low.webp',
+            large: imgBase + '/high.webp',
           },
           set: { name: setData.name || realId },
         };
@@ -1385,6 +1419,8 @@ async function getCardsForSet(setId){
       throw e;
     }
   }
+  
+  // English path
   try{
     const raw = await pokeFetch(`/cards?q=set.id:${setId}&pageSize=250`);
     const rawCards = raw.data || [];
