@@ -159,6 +159,13 @@ input:focus{outline:none; border-color:var(--cyan);}
 
 /* Real Authentic Card Back sourced from official TCG assets */
 .face.back{background:url('https://tcg.pokemon.com/assets/img/global/tcg-card-back-2x.jpg') center/cover no-repeat; border:1px solid var(--edge); display:flex; align-items:center; justify-content:center; overflow:hidden; z-index:2; backface-visibility:hidden; -webkit-backface-visibility:hidden;}
+/* One Piece packs stamp data-game="onepiece" on #flipcard (see showCard()) —
+   without this override every game shared the same hardcoded Pokémon
+   card-back image above, which is why One Piece cards were showing a
+   Pokéball back. No official card-back art is embedded here (that's
+   copyrighted); this is a simple in-house design instead. */
+.flipcard[data-game="onepiece"] .face.back{background:radial-gradient(circle at 30% 18%, #9b1c1c 0%, #4a0d0d 55%, #1a0404 100%);}
+.flipcard[data-game="onepiece"] .face.back::after{content:'ONE PIECE'; font-weight:800; letter-spacing:3px; font-size:14px; color:rgba(255,255,255,0.85); text-shadow:0 2px 6px rgba(0,0,0,0.6);}
 
 .reveal-screen.shake{animation:screenshake .5s cubic-bezier(.36,.07,.19,.97);}
 @keyframes screenshake{10%,90%{transform:translateX(-1px);}20%,80%{transform:translateX(2px);}30%,50%,70%{transform:translateX(-4px);}40%,60%{transform:translateX(4px);}}
