@@ -1,0 +1,42 @@
+# Chase Cards — everything here is public, client-rendered, and free to
+# crawl; there's no logged-in-only content a bot could stumble into, so
+# nothing is disallowed. Explicitly allowing the major AI crawlers below
+# isn't required (they'd be allowed by the wildcard anyway) but is left
+# in on purpose: it's the clearest signal to each of them individually
+# that they're welcome here, and it's one line each to remove later if
+# that ever changes.
+
+User-agent: *
+Allow: /
+
+# Search engines
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+# AI answer-engine / assistant crawlers — see /llms.txt for the
+# plain-language summary these are most likely to actually use.
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+Sitemap: https://chasecards.netlify.app/sitemap.xml

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Chase Cards is a single-page app — render('home'), render('collection'),
+  etc. all happen in-memory with no distinct browser URL per screen (only
+  ?ref=/?pull=/?u=&un= query-param deep links, which are per-user/dynamic
+  and not meaningful to list in a sitemap). So this lists just the one
+  real crawlable URL. If set/card pages ever get real paths (e.g.
+  /set/base-set), add <url> entries for those here — that's the point
+  where a sitemap actually starts pulling weight for a project like this.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://chasecards.netlify.app/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
