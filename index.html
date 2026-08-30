@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script type="text/javascript">(function(i,m,p,a,c,t){c.ire_o=p;c[p]=c[p]||function(){(c[p].a=c[p].a||[]).push(arguments)};t=a.createElement(m);var z=a.getElementsByTagName(m)[0];t.async=1;t.src=i;z.parentNode.insertBefore(t,z)})('https://utt.impactcdn.com/P-A7682682-2cfc-40ea-8447-0e105640d1031.js','script','impactStat',document,window);impactStat('transformLinks');impactStat('trackImpression');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="Open realistic Pokémon-style booster packs, collect cards, and chase rare pulls. Free to play, no download required.">
+<meta name="theme-color" content="#0a0c10">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Chase Cards">
+
+<!-- Canonical — set to the current production host (chasecards.netlify.app).
+     Update this to chasecards.eu.org (and everything below that repeats
+     the domain) once that domain's nameservers finish propagating on
+     Cloudflare and it's the one people actually land on — otherwise
+     search engines/AI crawlers may index the two as separate, competing
+     URLs instead of treating the .eu.org one as canonical. -->
+<link rel="canonical" href="https://chasecards.netlify.app/">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Chase Cards">
+<meta property="og:url" content="https://chasecards.netlify.app/">
+<meta property="og:title" content="Chase Cards - Real Trading Card Simulator">
+<meta property="og:description" content="Open realistic booster packs, collect cards, and chase rare pulls. Free to play, no download required.">
+<meta property="og:image" content="https://chasecards.netlify.app/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Chase Cards — open packs, chase the rare pull">
+<meta property="og:locale" content="en_US">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chase Cards - Real Trading Card Simulator">
+<meta name="twitter:description" content="Open realistic booster packs, collect cards, and chase rare pulls. Free to play, no download required.">
+<meta name="twitter:image" content="https://chasecards.netlify.app/og-image.png">
+<meta name="twitter:image:alt" content="Chase Cards — open packs, chase the rare pull">
+
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+
+<title>Chase Cards — Real Trading Card Simulator</title>
+
+<!-- Backend setup (Supabase schema, RLS policies, Stripe edge functions) lives in
+     SETUP.md, not here — keeping it out of the shipped HTML means it isn't
+     readable via "View Source" on the live site. -->
+
+<!-- Structured data — schema.org WebApplication. This is what lets Google
+     (rich results) and AI answer engines (Perplexity, ChatGPT Search,
+     Google AI Overviews, etc.) describe this accurately instead of
+     guessing from prose alone: free, no login required, browser-based.
+     See also /llms.txt (plain-language equivalent for LLM crawlers that
+     don't parse JSON-LD) and /robots.txt (explicitly allows the major
+     AI crawlers — a site that blocks them can't be cited by them). -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Chase Cards",
+  "url": "https://chasecards.netlify.app/",
+  "description": "Open realistic Pokémon-style and One Piece booster packs, collect cards, trade, and chase rare pulls. Free to play, no download or account required.",
+  "applicationCategory": "GameApplication",
+  "operatingSystem": "Any (web browser)",
+  "browserRequirements": "Requires JavaScript",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "image": "https://chasecards.netlify.app/og-image.png"
+}
+</script>
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<canvas class="confetti-canvas" id="confetti"></canvas>
+<div id="toast" class="toast"></div>
+<div id="app"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
