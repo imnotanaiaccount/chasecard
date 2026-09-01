@@ -1,0 +1,58 @@
+# Netlify custom headers — https://docs.netlify.com/routing/headers/
+#
+# CSP is shipped in *Report-Only* mode deliberately, not enforcing. This
+# app pulls images/data from ~15 external hosts, some of them only
+# discoverable by reading runtime API responses rather than app.js's own
+# source (e.g. Pokémon TCG API card images resolve to images.pokemontcg.io,
+# a domain that never appears literally in app.js — only api.pokemontcg.io
+# and dev.pokemontcg.io do). The directives below were built by grepping
+# every https:// literal in app.js/index.html/styles.css, reading the PWA
+# manifest + service worker code (both use blob: URLs — easy to miss and
+# an easy way to silently break "Add to Home Screen" and offline image
+# caching), and confirming the Pokémon TCG API's real image domain via
+# their docs. That's a solid pass, but "solid pass" isn't the same as
+# "verified against every runtime code path in a real browser" — proven
+# by cdn.viglink.com, loaded via a protocol-relative `//cdn.viglink.com/...`
+# URL by initSovrnCommerce(), which the https:// literal grep missed
+# outright and had to be added after the fact. script-src now covers the
+# script load itself, but whether vglnk.js makes its own background
+# tracking calls that need connect-src too is still unverified — exactly
+# what Report-Only mode exists to catch before this becomes enforcing.
+#
+# To promote to enforcing: open the live site, exercise every flow (open
+# a Pokémon pack, open a One Piece pack, view collection, trade, duel,
+# referral/share screen, admin panel if you have access), watch the
+# browser console for "Content-Security-Policy" violation reports. Zero
+# violations after a real pass through those flows → rename the header
+# below from Content-Security-Policy-Report-Only to Content-Security-Policy.
+/*
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' https://esm.sh https://utt.impactcdn.com https://cdn.viglink.com 'sha256-jt9B3QzfVLeZlhZdL6IFDmyZL6/VORDlbj2FXTviQGs=' 'sha256-7ZK7/PkXtHhzdVpnLH3IzHLj7wnbRUDM+ChvoHMk/xw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://chase-cards-img.joshhawleyofficial.workers.dev https://assets.tcgdex.net https://den-media.pokellector.com https://archives.bulbagarden.net https://tcg.pokemon.com https://raw.githubusercontent.com https://cdn.jsdelivr.net https://mdtpdqwxegmseidxnnvb.supabase.co https://images.pokemontcg.io; connect-src 'self' https://mdtpdqwxegmseidxnnvb.supabase.co wss://mdtpdqwxegmseidxnnvb.supabase.co https://api.github.com https://api.pokemontcg.io https://images.pokemontcg.io https://api.tcgdex.net https://cdn.jsdelivr.net https://dev.pokemontcg.io https://chase-cards-img.joshhawleyofficial.workers.dev https://raw.githubusercontent.com https://den-media.pokellector.com https://archives.bulbagarden.net https://esm.sh https://assets.tcgdex.net; manifest-src 'self' blob:; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), interest-cohort=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+
+# HTML must always be revalidated — it's the entry point, and app.js/
+# styles.css aren't cache-busted with a content hash in their filename,
+# so a long-cached index.html could keep pointing at stale references
+# even after a fresh deploy purges the CDN.
+/index.html
+  Cache-Control: no-cache
+
+# app.js and styles.css: no filename hash to bust on either, so these
+# stay no-cache too rather than risk someone sitting on stale JS for
+# hours after a deploy (this app changes often — was patched twice
+# today alone). Conditional GETs (304s) are cheap; a stale security fix
+# silently not reaching a visitor for a day is not.
+/app.js
+  Cache-Control: no-cache
+/styles.css
+  Cache-Control: no-cache
+
+# True static assets that only change on an intentional asset swap —
+# safe to cache longer since there's no ongoing-iteration risk here.
+/icon-*.png
+  Cache-Control: public, max-age=86400, must-revalidate
+/og-image.png
+  Cache-Control: public, max-age=86400, must-revalidate
