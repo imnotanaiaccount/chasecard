@@ -1,0 +1,19 @@
+[build]
+  # Netlify's build image has Node/npx preinstalled, so this runs with no
+  # package.json and no local toolchain — npx fetches esbuild fresh on
+  # Netlify's servers each build. Pinned to a specific version so a new
+  # esbuild release can't change output or break a build unexpectedly.
+  # --minify only (no --bundle): app.js's `import … from 'https://esm.sh/...'`
+  # stays as a plain ES module import pointed at esm.sh at runtime — bundling
+  # would try to inline that remote module, which isn't what we want here.
+  command = "npx --yes esbuild@0.24.2 app.js --minify --outfile=app.min.js"
+  publish = "."
+
+[[headers]]
+  # Long-lived caching for the minified bundle: its filename doesn't change
+  # between deploys, but Netlify's CDN still revalidates on each deploy since
+  # the underlying file content/ETag changes — this just avoids re-downloads
+  # for repeat visits between deploys.
+  for = "/app.min.js"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
